@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="splash_background">#20241E</color>
+    <color name="widget_surface">#222920</color>
+    <color name="widget_border">#414D3D</color>
+    <color name="widget_ink">#F3F1E8</color>
+    <color name="widget_muted">#C1C6B9</color>
+    <color name="widget_label">#D7F25B</color>
+    <color name="widget_accent">#D7F25B</color>
+    <color name="widget_row_surface">#2B342A</color>
+    <color name="widget_row_border">#414D3D</color>
+    <color name="widget_progress_track">#414D3D</color>
+    <color name="widget_bag_chip">#F3F1E8</color>
+    <color name="widget_action_ink">#20241E</color>
+    <color name="widget_config_surface">#20241E</color>
+    <color name="widget_config_ink">#F3F1E8</color>
+</resources>

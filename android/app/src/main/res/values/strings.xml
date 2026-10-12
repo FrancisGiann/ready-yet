@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ready Yet?</string>
+    <string name="app_tagline">Before I Leave</string>
+    <string name="widget_default_title">Ready Yet?</string>
+    <string name="widget_checklist_label">Ready Yet? · Packing checklist</string>
+    <string name="widget_quick_lists_label">Ready Yet? · Quick lists</string>
+    <string name="shortcut_pack_today_short">Pack today</string>
+    <string name="shortcut_pack_today_long">Pack for today</string>
+    <string name="widget_description">A quick view of your current packing list</string>
+    <string name="widget_open_full_list">Open full checklist</string>
+    <string name="widget_checklist_config_title">Choose a checklist</string>
+    <string name="widget_checklist_config_hint">This widget follows the active outing for the list you choose. It never starts an outing on its own.</string>
+    <string name="widget_quick_lists_config_title">Choose quick lists</string>
+    <string name="widget_quick_lists_config_hint">Pick up to four lists. Tap one on your home screen to open it or resume its active outing.</string>
+    <string name="widget_config_loading">Loading your lists…</string>
+    <string name="widget_config_no_lists">Open the app once and create a list, then return here to choose it.</string>
+    <string name="widget_config_open_app">Open Ready Yet?</string>
+    <string name="widget_config_save">Add widget</string>
+    <string name="widget_config_save_failed">The widget setting could not be saved. Try again.</string>
+    <string name="widget_edit_list_shortcuts">Manage quick lists</string>
+    <string name="quick_lists_widget_description">Open or resume up to four chosen packing lists</string>
+    <string name="widget_start_list">Start outing</string>
+    <string name="widget_resume_list">Resume outing</string>
+    <string name="widget_open_outing">Open full outing</string>
+    <string name="widget_empty_list">Add items in the app before starting</string>
+</resources>

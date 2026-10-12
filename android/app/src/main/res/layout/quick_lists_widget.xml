@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/quick_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:paddingStart="12dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="6dp">
+
+    <LinearLayout
+        android:id="@+id/quick_brand_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="26dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <ImageView android:id="@+id/quick_widget_icon" style="@style/WidgetBagIcon" />
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="7dp"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/quick_widget_title"
+                style="@style/WidgetBrandName"
+                android:text="@string/app_name" />
+            <TextView
+                android:id="@+id/quick_widget_tagline"
+                style="@style/WidgetBrandTagline"
+                android:text="@string/app_tagline" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/quick_list_rows"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:orientation="vertical">
+        <LinearLayout android:id="@+id/quick_list_1" style="@style/WidgetQuickListItem" android:visibility="gone">
+            <ImageView android:id="@+id/quick_list_icon_1" style="@style/WidgetBagIcon" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:id="@+id/quick_list_title_1" style="@style/WidgetQuickListName" />
+                <TextView android:id="@+id/quick_list_status_1" style="@style/WidgetQuickListStatus" />
+            </LinearLayout>
+            <TextView android:id="@+id/quick_list_badge_1" style="@style/WidgetQuickListBadge" android:layout_marginStart="6dp" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/quick_list_2" style="@style/WidgetQuickListItem" android:visibility="gone">
+            <ImageView android:id="@+id/quick_list_icon_2" style="@style/WidgetBagIcon" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:id="@+id/quick_list_title_2" style="@style/WidgetQuickListName" />
+                <TextView android:id="@+id/quick_list_status_2" style="@style/WidgetQuickListStatus" />
+            </LinearLayout>
+            <TextView android:id="@+id/quick_list_badge_2" style="@style/WidgetQuickListBadge" android:layout_marginStart="6dp" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/quick_list_3" style="@style/WidgetQuickListItem" android:visibility="gone">
+            <ImageView android:id="@+id/quick_list_icon_3" style="@style/WidgetBagIcon" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:id="@+id/quick_list_title_3" style="@style/WidgetQuickListName" />
+                <TextView android:id="@+id/quick_list_status_3" style="@style/WidgetQuickListStatus" />
+            </LinearLayout>
+            <TextView android:id="@+id/quick_list_badge_3" style="@style/WidgetQuickListBadge" android:layout_marginStart="6dp" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/quick_list_4" style="@style/WidgetQuickListItem" android:visibility="gone">
+            <ImageView android:id="@+id/quick_list_icon_4" style="@style/WidgetBagIcon" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:id="@+id/quick_list_title_4" style="@style/WidgetQuickListName" />
+                <TextView android:id="@+id/quick_list_status_4" style="@style/WidgetQuickListStatus" />
+            </LinearLayout>
+            <TextView android:id="@+id/quick_list_badge_4" style="@style/WidgetQuickListBadge" android:layout_marginStart="6dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/quick_widget_action"
+        style="@style/WidgetFooterAction"
+        android:layout_marginTop="1dp"
+        android:text="@string/widget_edit_list_shortcuts"
+        android:visibility="gone" />
+</LinearLayout>

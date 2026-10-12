@@ -1,0 +1,371 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../app/theme.dart';
+import '../domain/app_controller.dart';
+import '../domain/models.dart';
+import 'components.dart';
+
+class HistoryScreen extends StatelessWidget {
+  const HistoryScreen({
+    super.key,
+    required this.controller,
+    required this.openOuting,
+    required this.goToToday,
+  });
+  final AppController controller;
+  final ValueChanged<String> openOuting;
+  final VoidCallback goToToday;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, _) {
+      final completed =
+          controller.state.outings.where((outing) => outing.isComplete).toList()
+            ..sort(
+              (a, b) => (b.completedAt ?? b.startedAt).compareTo(
+                a.completedAt ?? a.startedAt,
+              ),
+            );
+      final dismissed =
+          controller.state.outings
+              .where((outing) => outing.isDismissed)
+              .toList()
+            ..sort(
+              (a, b) => (b.dismissedAtUTC ?? b.startedAt).compareTo(
+                a.dismissedAtUTC ?? a.startedAt,
+              ),
+            );
+      return CustomScrollView(
+        key: const PageStorageKey<String>('history'),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(22, 25, 22, 34),
+            sliver: SliverList.list(
+              children: [
+                const Eyebrow('A small record of done'),
+                const SizedBox(height: 8),
+                Text(
+                  'Good to go.',
+                  style: Theme.of(context).textTheme.headlineLarge,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Completed outings live here. Reopen one if there’s something more to pack.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 19),
+                if (completed.isEmpty)
+                  SurfaceCard(
+                    child: const EmptyState(
+                      title: 'Nothing to look back on yet',
+                      message: 'When you finish an outing, its packed list will appear here.',
+                      icon: Icons.done_all_rounded,
+                    ),
+                  )
+                else
+                  ...completed.map(
+                    (outing) => Padding(
+                      padding: const EdgeInsets.only(bottom: 11),
+                      child: _HistoryCard(
+                        outing: outing,
+                        onOpen: () => openOuting(outing.id),
+                        onReopen: () => _reopen(context, outing),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                if (completed.isNotEmpty)
+                  Center(
+                    child: Text(
+                      '${completed.length} ${completed.length == 1 ? 'outing' : 'outings'} finished',
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: context.appColors.muted),
+                    ),
+                  ),
+                if (dismissed.isNotEmpty) ...[
+                  const SizedBox(height: 26),
+                  const Eyebrow('Set aside for later'),
+                  const SizedBox(height: 7),
+                  Text(
+                    'Dismissed outings',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    'These are still in progress. Restore one to pick it up again.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 14),
+                  ...dismissed.map(
+                    (outing) => Padding(
+                      padding: const EdgeInsets.only(bottom: 11),
+                      child: _DismissedOutingCard(
+                        outing: outing,
+                        onRestore: () => _restoreDismissed(context, outing),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      );
+    },
+  );
+
+  Future<void> _reopen(BuildContext context, Outing outing) async {
+    try {
+      await controller.undoFinish(outing.id);
+      if (context.mounted) {
+        openOuting(outing.id);
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn’t reopen this outing. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _restoreDismissed(BuildContext context, Outing outing) async {
+    try {
+      await controller.restoreOuting(outing.id);
+      if (context.mounted) {
+        goToToday();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${outing.blueprintName} is back in Today.')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn’t restore this outing. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+}
+
+class _DismissedOutingCard extends StatelessWidget {
+  const _DismissedOutingCard({required this.outing, required this.onRestore});
+
+  final Outing outing;
+  final VoidCallback onRestore;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Material(
+      color: colors.surface,
+      borderRadius: BorderRadius.circular(23),
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconTile(
+                  icon: Icons.inventory_2_outlined,
+                  color: colors.sky,
+                  size: 47,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        outing.blueprintName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_formatDate(outing.date)}  ·  ${outing.checkedCount} of ${outing.items.length} packed',
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: colors.muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: onRestore,
+                icon: const Icon(Icons.unarchive_outlined, size: 18),
+                label: const Text('Restore outing'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.line),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryCard extends StatelessWidget {
+  const _HistoryCard({
+    required this.outing,
+    required this.onOpen,
+    required this.onReopen,
+  });
+  final Outing outing;
+  final VoidCallback onOpen;
+  final VoidCallback onReopen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Material(
+      color: colors.surface,
+      borderRadius: BorderRadius.circular(23),
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(23),
+        child: Padding(
+          padding: const EdgeInsets.all(15),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  IconTile(
+                    icon: Icons.done_rounded,
+                    color: colors.accent,
+                    size: 47,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          outing.blueprintName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _formatDate(outing.date),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, color: colors.muted),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: outing.items
+                    .take(4)
+                    .map(
+                      (item) => Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.surfaceRaised,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              iconFor(item.iconKey),
+                              size: 14,
+                              color: colors.muted,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              item.label,
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(color: colors.muted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+              if (outing.items.length > 4)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '+${outing.items.length - 4} more',
+                    style: Theme.of(context).textTheme.labelSmall
+                        ?.copyWith(color: colors.muted),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: onReopen,
+                  icon: const Icon(Icons.replay_rounded, size: 18),
+                  label: const Text('Reopen outing'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: colors.ink,
+                    side: BorderSide(color: colors.line),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _formatDate(String key) {
+  final parts = key.split('-').map(int.parse).toList();
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[parts[1] - 1]} ${parts[2]}, ${parts[0]}';
+}
