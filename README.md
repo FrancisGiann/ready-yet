@@ -4,6 +4,18 @@
 
 Choose School, Work, Gym, Trip, or a custom list. Check items as you pack, resume unfinished outings, and keep reusable list edits separate from outings already in progress. Optional local reminders, checklist and Quick lists widgets, a Pack for today shortcut, themes, and reduced motion are included.
 
+## Watch the ad
+
+**Before I Leave** · 22 seconds
+
+<a href="docs/media/Ready-Yet-before-I-leave.mp4?raw=true">
+  <img src="docs/media/Ready-Yet-before-I-leave-cover.jpg" alt="Ready Yet? — Before I Leave. Watch the 22-second ad." width="280">
+</a>
+
+[▶ Watch the ad (MP4)](docs/media/Ready-Yet-before-I-leave.mp4?raw=true) · [Caption and credits](docs/media/Ready-Yet-caption-and-credits.txt)
+
+Music: “Happy Beats & Business Moves Vol. 1” by Sascha Ende, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Trimmed, normalized, faded and mixed for this ad.
+
 ## Build
 
 Requirements: Flutter 3.47.2 or compatible, Android SDK 36, and a JDK supported by the Android Gradle Plugin (17 or newer). The app supports Android 7.0 (API 24) and newer.
