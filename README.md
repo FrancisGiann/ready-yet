@@ -6,15 +6,17 @@ Choose School, Work, Gym, Trip, or a custom list. Check items as you pack, resum
 
 ## Watch the ad
 
-**Before I Leave** · 22 seconds
+**The keys are still inside** · 18 seconds
 
-<a href="https://raw.githubusercontent.com/FrancisGiann/ready-yet/main/docs/media/Ready-Yet-before-I-leave.mp4">
-  <img src="docs/media/Ready-Yet-before-I-leave-cover.jpg" alt="Ready Yet? — Before I Leave. Download the 22-second ad (MP4)." width="280">
+<a href="https://raw.githubusercontent.com/FrancisGiann/ready-yet/main/docs/media/ads/Ready-Yet-The-Keys-Are-Still-Inside.mp4">
+  <img src="docs/media/ads/Ready-Yet-The-Keys-Are-Still-Inside-cover.jpg" alt="Ready Yet? — The keys are still inside. Open the 18-second ad (MP4)." width="280">
 </a>
 
-[Download the ad (MP4)](https://raw.githubusercontent.com/FrancisGiann/ready-yet/main/docs/media/Ready-Yet-before-I-leave.mp4) · [View file on GitHub](docs/media/Ready-Yet-before-I-leave.mp4) · [Caption and credits](docs/media/Ready-Yet-caption-and-credits.txt)
+[Watch or download the ad (MP4)](https://raw.githubusercontent.com/FrancisGiann/ready-yet/main/docs/media/ads/Ready-Yet-The-Keys-Are-Still-Inside.mp4) · [View file on GitHub](docs/media/ads/Ready-Yet-The-Keys-Are-Still-Inside.mp4) · [Caption and credits](docs/media/ads/Ready-Yet-The-Keys-Are-Still-Inside-caption.txt)
 
-Music: “Happy Beats & Business Moves Vol. 1” by Sascha Ende, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Trimmed, normalized, faded and mixed for this ad.
+An illustrated leaving-home story ends with the actual Ready Yet? icon, a staged app completion screen and the tagline **Before I leave**.
+
+Music: [Carefree](https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1400037) by Kevin MacLeod ([incompetech.com](https://incompetech.com/)), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Trimmed, normalized, faded and mixed, with a brief narrative volume dip. Full credits are linked above.
 
 ## Build
 

@@ -1,0 +1,9 @@
+Already halfway out the door? Ready Yet? makes that last check a little calmer. Before I leave. Download for Android.
+
+"Carefree" Kevin MacLeod (incompetech.com)
+Licensed under Creative Commons: By Attribution 4.0 License
+https://creativecommons.org/licenses/by/4.0/
+Source: https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1400037
+Music was trimmed, normalized, faded and mixed, with a brief narrative volume dip.
+
+UI icons: Google Material Icons, CC BY 4.0 (rendered in staged Flutter widget captures): https://creativecommons.org/licenses/by/4.0/.
