@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 
+import 'checklist_schedule.dart';
+export 'checklist_schedule.dart';
+
 @immutable
 class ChecklistItem {
   const ChecklistItem({
@@ -210,6 +213,7 @@ class Outing {
     required this.startedAt,
     required Iterable<OutingItem> items,
     this.completedAt,
+    this.scheduleId,
     DateTime? dismissedAtUTC,
   }) : date = requireCalendarDate(date),
        dismissedAtUTC = dismissedAtUTC?.toUtc(),
@@ -221,6 +225,7 @@ class Outing {
   final String date;
   final DateTime startedAt;
   final DateTime? completedAt;
+  final String? scheduleId;
 
   /// UTC instant when this unfinished session was dismissed from active lists.
   /// Completed sessions remain in history and are never dismissed.
@@ -248,6 +253,7 @@ class Outing {
     blueprintName: blueprintName ?? this.blueprintName,
     date: date ?? this.date,
     startedAt: startedAt ?? this.startedAt,
+    scheduleId: scheduleId,
     completedAt: identical(completedAt, _unchanged)
         ? this.completedAt
         : completedAt as DateTime?,
@@ -263,6 +269,7 @@ class Outing {
     'blueprintName': blueprintName,
     'date': date,
     'startedAt': startedAt.toUtc().toIso8601String(),
+    if (scheduleId != null) 'scheduleId': scheduleId,
     'completedAt': completedAt?.toUtc().toIso8601String(),
     'dismissedAtUTC': dismissedAtUTC?.toUtc().toIso8601String(),
     'items': items.map((item) => item.toJson()).toList(),
@@ -291,6 +298,7 @@ class Outing {
       blueprintName: _requiredString(json, 'blueprintName'),
       date: requireCalendarDate(_requiredString(json, 'date')),
       startedAt: startedAt,
+      scheduleId: json['scheduleId'] as String?,
       completedAt: completedAt,
       dismissedAtUTC: dismissedAtUTC,
       items: _objectList(
@@ -380,16 +388,19 @@ class AppState {
     Iterable<Blueprint> blueprints = const [],
     Iterable<DatedExtra> extras = const [],
     Iterable<Outing> outings = const [],
+    Iterable<ChecklistSchedule> schedules = const [],
     Map<String, String> widgetLaunchRequests = const {},
     this.settings = const AppSettings(),
   }) : blueprints = List.unmodifiable(blueprints),
        extras = List.unmodifiable(extras),
        outings = List.unmodifiable(outings),
+       schedules = List.unmodifiable(schedules),
        widgetLaunchRequests = Map.unmodifiable(widgetLaunchRequests);
 
   final List<Blueprint> blueprints;
   final List<DatedExtra> extras;
   final List<Outing> outings;
+  final List<ChecklistSchedule> schedules;
   final Map<String, String> widgetLaunchRequests;
   final AppSettings settings;
 
@@ -397,12 +408,14 @@ class AppState {
     Iterable<Blueprint>? blueprints,
     Iterable<DatedExtra>? extras,
     Iterable<Outing>? outings,
+    Iterable<ChecklistSchedule>? schedules,
     Map<String, String>? widgetLaunchRequests,
     AppSettings? settings,
   }) => AppState(
     blueprints: blueprints ?? this.blueprints,
     extras: extras ?? this.extras,
     outings: outings ?? this.outings,
+    schedules: schedules ?? this.schedules,
     widgetLaunchRequests: widgetLaunchRequests ?? this.widgetLaunchRequests,
     settings: settings ?? this.settings,
   );
@@ -412,6 +425,7 @@ class AppState {
     'blueprints': blueprints.map((item) => item.toJson()).toList(),
     'extras': extras.map((item) => item.toJson()).toList(),
     'outings': outings.map((item) => item.toJson()).toList(),
+    'schedules': schedules.map((item) => item.toJson()).toList(),
     'widgetLaunchRequests': widgetLaunchRequests,
     'settings': settings.toJson(),
   };
@@ -444,6 +458,12 @@ class AppState {
       ).map(Blueprint.fromJson),
       extras: _objectList(json['extras'], 'extras').map(DatedExtra.fromJson),
       outings: _objectList(json['outings'], 'outings').map(Outing.fromJson),
+      schedules: json['schedules'] == null
+          ? const []
+          : _objectList(
+              json['schedules'],
+              'schedules',
+            ).map(ChecklistSchedule.fromJson),
       widgetLaunchRequests: widgetLaunchRequests,
       settings: AppSettings.fromJson(
         rawSettings == null
@@ -454,8 +474,16 @@ class AppState {
   }
 
   Map<String, Object?> get widgetSummary {
-    final active = outings.where((outing) => outing.isActive).toList()
-      ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    final active =
+        outings
+            .where(
+              (outing) =>
+                  outing.isActive &&
+                  (outing.scheduleId == null ||
+                      outing.date == localDateKey(DateTime.now())),
+            )
+            .toList()
+          ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
     if (active.isEmpty) {
       final latest = outings.where((outing) => !outing.isDismissed).toList()
         ..sort((a, b) => b.startedAt.compareTo(a.startedAt));

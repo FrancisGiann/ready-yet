@@ -308,8 +308,9 @@ void main() {
       await tester.pump();
       final packedOpen = await _captureBag(tester);
       await tester.runAsync(() async {
-        await File('qa/screenshots/motion_reduced_static_packed_open.png')
-            .writeAsBytes(packedOpen);
+        await File(
+          '${_captureDirectory()}/motion_reduced_static_packed_open.png',
+        ).writeAsBytes(packedOpen);
       });
       await tester.pump(const Duration(milliseconds: 120));
       expect(await _captureBag(tester), orderedEquals(packedOpen));
@@ -318,7 +319,7 @@ void main() {
       await tester.pump();
       final sealedStatic = await _captureBag(tester);
       await tester.runAsync(() async {
-        await File('qa/screenshots/motion_reduced_static_sealed.png')
+        await File('${_captureDirectory()}/motion_reduced_static_sealed.png')
             .writeAsBytes(sealedStatic);
       });
       await tester.pump(const Duration(milliseconds: 120));
@@ -438,7 +439,7 @@ Future<void> _captureFrame(WidgetTester tester, String name) async {
     try {
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data == null) throw StateError('Could not encode $name');
-      final file = File('qa/screenshots/$name.png');
+      final file = File('${_captureDirectory()}/$name.png');
       await file.parent.create(recursive: true);
       await file.writeAsBytes(data.buffer.asUint8List());
     } finally {
@@ -446,6 +447,9 @@ Future<void> _captureFrame(WidgetTester tester, String name) async {
     }
   });
 }
+
+String _captureDirectory() =>
+    Platform.environment['READY_YET_QA_CAPTURE_DIR'] ?? 'qa/screenshots';
 
 Future<Uint8List> _captureBag(WidgetTester tester) async {
   return (await tester.runAsync(() async {

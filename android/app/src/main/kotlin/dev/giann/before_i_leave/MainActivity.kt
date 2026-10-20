@@ -55,6 +55,23 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
+                    "openNotificationSettings" -> {
+                        runCatching {
+                            val settings = if (Build.VERSION.SDK_INT >= 26) android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+                            else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:$packageName"))
+                            startActivity(settings)
+                            true
+                        }.fold(result::success) { result.success(false) }
+                    }
+                    "openPreciseReminderSettings" -> {
+                        if (Build.VERSION.SDK_INT >= 31) {
+                            runCatching { startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                android.net.Uri.parse("package:$packageName"))); true }
+                                .fold(result::success) { result.success(false) }
+                        } else result.success(false)
+                    }
                     "requestNotifications" -> requestNotificationPermission(result)
                     "getLaunchAction" -> consumeLaunchAction(result)
                     else -> result.notImplemented()
@@ -78,6 +95,7 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         ReminderScheduler.rescheduleIfEnabled(this)
+        ChecklistScheduleScheduler.enqueue(this)
         LeaveWidgetProvider.refreshAll(this)
         QuickListsWidgetProvider.refreshAll(this)
     }
@@ -115,6 +133,7 @@ class MainActivity : FlutterActivity() {
     private fun readStateAsync(result: MethodChannel.Result) {
         storageExecutor.execute {
             val state = runCatching { NativeStateStore.readState(this) }
+            ChecklistScheduleScheduler.refresh(this)
             mainHandler.post {
                 state.fold(
                     result::success,
@@ -142,6 +161,7 @@ class MainActivity : FlutterActivity() {
                     args?.get("lifecycleIntents"),
                 )
             }
+            if (write.isSuccess) ChecklistScheduleScheduler.refresh(this)
             mainHandler.post {
                 write.fold(
                     { canonical ->

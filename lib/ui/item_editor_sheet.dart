@@ -13,6 +13,7 @@ Future<void> showItemEditor(
   String initialIcon = 'other',
   required FutureOr<void> Function(String label, String iconKey) onSave,
 }) async {
+  final disableAnimations = MediaQuery.disableAnimationsOf(context);
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -21,11 +22,17 @@ Future<void> showItemEditor(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
-    builder: (context) => _ItemEditorSheet(
-      title: title,
-      initialLabel: initialLabel,
-      initialIcon: initialIcon,
-      onSave: onSave,
+    builder: (sheetContext) => MediaQuery(
+      data: MediaQuery.of(sheetContext).copyWith(
+        disableAnimations:
+            MediaQuery.disableAnimationsOf(sheetContext) || disableAnimations,
+      ),
+      child: _ItemEditorSheet(
+        title: title,
+        initialLabel: initialLabel,
+        initialIcon: initialIcon,
+        onSave: onSave,
+      ),
     ),
   );
 }
@@ -53,24 +60,6 @@ class _ItemEditorSheetState extends State<_ItemEditorSheet> {
   late String _icon = widget.initialIcon;
   bool _saving = false;
   String? _error;
-  static const _iconKeys = [
-    'bag',
-    'key',
-    'phone',
-    'wallet',
-    'water',
-    'book',
-    'notebook',
-    'pen',
-    'laptop',
-    'charger',
-    'clothes',
-    'medicine',
-    'ticket',
-    'umbrella',
-    'other',
-  ];
-
   @override
   void dispose() {
     _label.dispose();
@@ -78,6 +67,7 @@ class _ItemEditorSheetState extends State<_ItemEditorSheet> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     final label = _label.text.trim();
     if (label.isEmpty) {
       setState(() => _error = 'Give this item a name.');
@@ -107,7 +97,14 @@ class _ItemEditorSheetState extends State<_ItemEditorSheet> {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    final iconKeys = [..._iconKeys, if (!_iconKeys.contains(_icon)) _icon];
+    // Keep legacy keys values on the model; only present their canonical
+    // equivalent once in the picker unless the user explicitly chooses it.
+    final selectedIcon = _icon == 'keys' ? 'key' : _icon;
+    final iconKeys = [
+      ...iconChoiceKeys,
+      if (!iconChoiceKeys.contains(selectedIcon)) selectedIcon,
+    ];
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(
         22,
@@ -181,27 +178,46 @@ class _ItemEditorSheetState extends State<_ItemEditorSheet> {
               spacing: 8,
               runSpacing: 8,
               children: iconKeys.map((key) {
-                final selected = key == _icon;
+                final selected = key == selectedIcon;
+                final label = iconLabel(key);
+                void selectIcon() => setState(() => _icon = key);
                 return Semantics(
                   button: true,
+                  enabled: !_saving,
                   selected: selected,
-                  label: '${key[0].toUpperCase()}${key.substring(1)} icon',
-                  child: InkWell(
-                    onTap: () => setState(() => _icon = key),
-                    borderRadius: BorderRadius.circular(15),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: selected ? colors.accent : colors.surfaceRaised,
+                  label: '$label icon',
+                  onTap: _saving ? null : selectIcon,
+                  child: ExcludeSemantics(
+                    child: Tooltip(
+                      message: label,
+                      child: InkWell(
+                        onTap: _saving ? null : selectIcon,
                         borderRadius: BorderRadius.circular(15),
-                        border: Border.all(
-                          color: selected ? colors.ink : Colors.transparent,
-                          width: selected ? 1.5 : 0,
+                        child: AnimatedContainer(
+                          duration: reduceMotion
+                              ? Duration.zero
+                              : const Duration(milliseconds: 150),
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? colors.accent
+                                : colors.surfaceRaised,
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: selected ? colors.ink : Colors.transparent,
+                              width: selected ? 1.5 : 0,
+                            ),
+                          ),
+                          child: Center(
+                            child: ItemGlyph(
+                              iconKey: key,
+                              color: selected ? colors.accentInk : colors.ink,
+                              size: 24,
+                            ),
+                          ),
                         ),
                       ),
-                      child: Icon(iconFor(key), color: colors.ink),
                     ),
                   ),
                 );

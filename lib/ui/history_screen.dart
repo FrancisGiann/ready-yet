@@ -7,23 +7,43 @@ import '../domain/app_controller.dart';
 import '../domain/models.dart';
 import 'components.dart';
 
-class HistoryScreen extends StatelessWidget {
+class HistoryScreen extends StatefulWidget {
   const HistoryScreen({
     super.key,
     required this.controller,
     required this.openOuting,
     required this.goToToday,
+    required this.navigationGeneration,
   });
   final AppController controller;
   final ValueChanged<String> openOuting;
   final VoidCallback goToToday;
+  final int navigationGeneration;
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  final Map<String, Outing> _reopeningOutings = <String, Outing>{};
+
+  AppController get controller => widget.controller;
+  ValueChanged<String> get openOuting => widget.openOuting;
+  VoidCallback get goToToday => widget.goToToday;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
       final completed =
-          controller.state.outings.where((outing) => outing.isComplete).toList()
+          controller.state.outings
+              .where(
+                (outing) =>
+                    outing.isComplete ||
+                    _reopeningOutings.containsKey(outing.id),
+              )
+              .map((outing) => _reopeningOutings[outing.id] ?? outing)
+              .toList()
             ..sort(
               (a, b) => (b.completedAt ?? b.startedAt).compareTo(
                 a.completedAt ?? a.startedAt,
@@ -53,7 +73,7 @@ class HistoryScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Completed outings live here. Reopen one if there’s something more to pack.',
+                  'Reopen an outing to keep its checkmarks, or start a fresh one from Today.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 19),
@@ -70,9 +90,11 @@ class HistoryScreen extends StatelessWidget {
                     (outing) => Padding(
                       padding: const EdgeInsets.only(bottom: 11),
                       child: _HistoryCard(
+                        key: ValueKey<String>('history-${outing.id}'),
                         outing: outing,
                         onOpen: () => openOuting(outing.id),
                         onReopen: () => _reopen(context, outing),
+                        reopening: _reopeningOutings.containsKey(outing.id),
                       ),
                     ),
                   ),
@@ -118,9 +140,24 @@ class HistoryScreen extends StatelessWidget {
   );
 
   Future<void> _reopen(BuildContext context, Outing outing) async {
+    if (_reopeningOutings.containsKey(outing.id)) return;
+    final navigationGeneration = widget.navigationGeneration;
+    final navigator = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    _reopeningOutings[outing.id] = outing;
+    setState(() {});
     try {
       await controller.undoFinish(outing.id);
-      if (context.mounted) {
+      final reopened = controller.state.outings
+          .where((value) => value.id == outing.id)
+          .firstOrNull;
+      if (reopened?.isActive != true) {
+        throw StateError('This outing could not be reopened.');
+      }
+      if (context.mounted &&
+          widget.navigationGeneration == navigationGeneration &&
+          !navigator.canPop() &&
+          ModalRoute.of(context) == route) {
         openOuting(outing.id);
       }
     } catch (_) {
@@ -130,6 +167,10 @@ class HistoryScreen extends StatelessWidget {
             content: Text('Couldn’t reopen this outing. Please try again.'),
           ),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _reopeningOutings.remove(outing.id));
       }
     }
   }
@@ -228,13 +269,16 @@ class _DismissedOutingCard extends StatelessWidget {
 
 class _HistoryCard extends StatelessWidget {
   const _HistoryCard({
+    super.key,
     required this.outing,
     required this.onOpen,
     required this.onReopen,
+    required this.reopening,
   });
   final Outing outing;
   final VoidCallback onOpen;
   final VoidCallback onReopen;
+  final bool reopening;
 
   @override
   Widget build(BuildContext context) {
@@ -243,7 +287,7 @@ class _HistoryCard extends StatelessWidget {
       color: colors.surface,
       borderRadius: BorderRadius.circular(23),
       child: InkWell(
-        onTap: onOpen,
+        onTap: reopening ? null : onOpen,
         borderRadius: BorderRadius.circular(23),
         child: Padding(
           padding: const EdgeInsets.all(15),
@@ -300,8 +344,8 @@ class _HistoryCard extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              iconFor(item.iconKey),
+                            ItemGlyph(
+                              iconKey: item.iconKey,
                               size: 14,
                               color: colors.muted,
                             ),
@@ -331,9 +375,15 @@ class _HistoryCard extends StatelessWidget {
                 width: double.infinity,
                 height: 48,
                 child: OutlinedButton.icon(
-                  onPressed: onReopen,
-                  icon: const Icon(Icons.replay_rounded, size: 18),
-                  label: const Text('Reopen outing'),
+                  onPressed: reopening ? null : onReopen,
+                  icon: reopening
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: Icon(Icons.sync_rounded, size: 18),
+                        )
+                      : const Icon(Icons.replay_rounded, size: 18),
+                  label: Text(reopening ? 'Reopening…' : 'Reopen outing'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: colors.ink,
                     side: BorderSide(color: colors.line),

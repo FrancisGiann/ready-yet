@@ -2,7 +2,7 @@
 
 **Before I Leave** is the tagline for Ready Yet?, an offline Android checklist for the things you want with you before heading out. Lists and outings stay in the app’s private storage. No account, network service, ads, analytics, subscription, or purchase is required.
 
-Choose School, Work, Gym, Trip, or a custom list. Check items as you pack, resume unfinished outings, and keep reusable list edits separate from outings already in progress. Optional local reminders, checklist and Quick lists widgets, a Pack for today shortcut, themes, and reduced motion are included.
+Choose School, Work, Gym, Trip, or a custom list. Check items as you pack, resume unfinished outings, and keep reusable list edits separate from outings already in progress. Recurring weekday schedules create independent daily checklists with optional departure reminders and Open, Snooze and Skip actions. Compact 2×2 checklist and Quick lists widgets retain larger layouts. The ID card/Perfume icons, Back to home completion flow, Pack for today shortcut, themes and reduced motion are included.
 
 ## Watch the ad
 
@@ -28,6 +28,7 @@ flutter analyze
 flutter test
 android/qa/check_widget_policy.sh
 android/qa/check_reminder_time.sh
+android/qa/check_schedule_time.sh
 flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons --no-pub
 ```
 
@@ -35,4 +36,6 @@ The Gradle configuration currently signs release-mode builds with the local Andr
 
 ## Verification
 
-Prior verification recorded 64 passing Flutter tests with clean analysis, 96 pure-Java native policy assertions, and nine native widget XML captures rendered with Layoutlib. One capture uses a title TextView fallback in the renderer fixture. These checks do not include a physical phone, emulator, or launcher runtime test; Layoutlib and Flutter test renders cannot establish OEM widget behavior. The nine layouts are generated QA output and are not included in this source repository. Generated APKs and source archives are also kept out.
+Ready Yet? 1.0.5+6 passed 87 Flutter tests, clean Flutter analysis, 253 Java native policy assertions (226 existing plus 27 schedule checks), Android release compilation and release lint (zero errors, 89 warnings). Four synthetic Robolectric API 35 runtime tests cover scheduled occurrence storage/merges, reminder actions and suppression. Native XML previews cover 31 compact/larger widget cases; eight Flutter schedule previews cover long titles, light/dark and 2× text. See [schedule implementation and validation](docs/SCHEDULES_IMPLEMENTATION.md) and [1.0.5 notes](docs/UPDATE_1_0_5.md).
+
+The arm64 APK retains package `dev.giann.before_i_leave`, increases version code from 5 to 6 and matches the previous signing certificate. Signature/package checks support upgrade compatibility; an in-place installation on a physical device or emulator was not performed. No configured emulator/system image or attached device was available. Synthetic runtime/preview checks do not establish OEM launcher, Doze, reboot or background-alarm delivery behavior. No location permission or tracking was added.

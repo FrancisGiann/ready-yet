@@ -159,7 +159,7 @@ class _HomeWidgetGuideState extends State<HomeWidgetGuide> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Choose a checklist or keep a few favorite lists nearby.',
+                'Both widgets start at 2×2. Resize for more items or lists.',
                 style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: context.appColors.muted),
               ),

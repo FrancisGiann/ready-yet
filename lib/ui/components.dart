@@ -33,9 +33,96 @@ const iconChoices = <String, IconData>{
   'ticket': Icons.confirmation_number_outlined,
   'passport': Icons.travel_explore_outlined,
   'glasses': Icons.visibility_outlined,
+  'sanitizer': Icons.sanitizer_outlined,
+  'soap': Icons.soap_outlined,
+  // ItemGlyph paints this key as a perfume bottle. Keep an icon fallback for
+  // callers that only understand Material IconData.
+  'perfume': Icons.spa_outlined,
   'other': Icons.circle_outlined,
   'spark': Icons.auto_awesome_outlined,
 };
+
+/// The icons shown when adding or editing a checklist item.
+///
+/// Historical keys such as `keys`, `shoes`, and `spark` remain in
+/// [iconChoices] for saved data, but aliases are not offered twice.
+const iconChoiceKeys = <String>[
+  'bag',
+  'wallet',
+  'key',
+  'phone',
+  'badge',
+  'laptop',
+  'briefcase',
+  'charger',
+  'water',
+  'lunch',
+  'book',
+  'notebook',
+  'pen',
+  'headphones',
+  'glasses',
+  'clothes',
+  'towel',
+  'medicine',
+  'soap',
+  'sanitizer',
+  'perfume',
+  'suitcase',
+  'ticket',
+  'passport',
+  'umbrella',
+  'other',
+];
+
+String iconLabel(String key) {
+  const labels = <String, String>{
+    'wallet': 'Wallet',
+    'key': 'Key',
+    'keys': 'Keys',
+    'phone': 'Phone',
+    'water': 'Water bottle',
+    'lunch': 'Lunch',
+    'book': 'Book',
+    'notebook': 'Notebook',
+    'pen': 'Pen',
+    'laptop': 'Laptop',
+    'briefcase': 'Briefcase',
+    'badge': 'ID card',
+    'dumbbell': 'Workout gear',
+    'shoe': 'Shoes',
+    'shoes': 'Shoes',
+    'towel': 'Towel',
+    'suitcase': 'Suitcase',
+    'headphones': 'Headphones',
+    'clothes': 'Clothes',
+    'medicine': 'Medicine',
+    'charger': 'Charger',
+    'bag': 'Bag',
+    'umbrella': 'Umbrella',
+    'ticket': 'Ticket',
+    'passport': 'Passport',
+    'glasses': 'Glasses',
+    'sanitizer': 'Hand sanitizer',
+    'soap': 'Soap',
+    'perfume': 'Perfume',
+    'other': 'Other',
+    'spark': 'Special item',
+  };
+  final known = labels[key];
+  if (known != null) return known;
+
+  final words = key
+      .trim()
+      .replaceAll(RegExp(r'[_-]+'), ' ')
+      .split(RegExp(r'\s+'));
+  final readable = words
+      .where((word) => word.isNotEmpty)
+      .take(4)
+      .map((word) => '${word[0].toUpperCase()}${word.substring(1)}')
+      .join(' ');
+  return readable.isEmpty ? 'Other' : readable;
+}
 
 IconData iconFor(String key) => iconChoices[key] ?? Icons.circle_outlined;
 
@@ -176,11 +263,13 @@ class SaveErrorBanner extends StatelessWidget {
 class IconTile extends StatelessWidget {
   const IconTile({
     super.key,
-    required this.icon,
+    this.icon,
+    this.iconKey,
     required this.color,
     this.size = 48,
-  });
-  final IconData icon;
+  }) : assert(icon != null || iconKey != null);
+  final IconData? icon;
+  final String? iconKey;
   final Color color;
   final double size;
 
@@ -195,9 +284,94 @@ class IconTile extends StatelessWidget {
         color: color,
         borderRadius: BorderRadius.circular(size * .32),
       ),
-      child: Icon(icon, color: foreground, size: size * .48),
+      child: iconKey == null
+          ? Icon(icon!, color: foreground, size: size * .48)
+          : ItemGlyph(iconKey: iconKey!, color: foreground, size: size * .48),
     );
   }
+}
+
+class ItemGlyph extends StatelessWidget {
+  const ItemGlyph({
+    super.key,
+    required this.iconKey,
+    required this.color,
+    this.size = 24,
+  });
+
+  final String iconKey;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => iconKey == 'perfume'
+      ? Center(
+          child: SizedBox.square(
+            dimension: size,
+            child: CustomPaint(painter: _PerfumeBottlePainter(color)),
+          ),
+        )
+      : Icon(iconFor(iconKey), color: color, size: size);
+}
+
+class _PerfumeBottlePainter extends CustomPainter {
+  const _PerfumeBottlePainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scale = size.shortestSide / 24;
+    canvas.save();
+    canvas.translate(
+      (size.width - size.shortestSide) / 2,
+      (size.height - size.shortestSide) / 2,
+    );
+    canvas.scale(scale);
+    final outline = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final bottle = Path()
+      ..moveTo(7, 9)
+      ..lineTo(9, 7.5)
+      ..lineTo(15, 7.5)
+      ..lineTo(17, 9)
+      ..lineTo(18.5, 10.5)
+      ..lineTo(18.5, 20)
+      ..quadraticBezierTo(18.5, 22, 16.5, 22)
+      ..lineTo(7.5, 22)
+      ..quadraticBezierTo(5.5, 22, 5.5, 20)
+      ..lineTo(5.5, 10.5)
+      ..close();
+    canvas.drawPath(bottle, outline);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTRB(9.5, 4.5, 14.5, 7.5),
+        const Radius.circular(0.8),
+      ),
+      outline,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTRB(8.5, 1.8, 15.5, 4.5),
+        const Radius.circular(0.8),
+      ),
+      outline,
+    );
+    canvas.drawLine(const Offset(12, 1.8), const Offset(12, 0.6), outline);
+    canvas.drawLine(const Offset(12, 0.6), const Offset(15.3, 0.6), outline);
+    canvas.drawLine(const Offset(15.3, 0.6), const Offset(16, 1.5), outline);
+    canvas.drawLine(const Offset(8, 13), const Offset(16, 13), outline);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _PerfumeBottlePainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 class BagTray extends StatefulWidget {
@@ -628,7 +802,7 @@ class ChecklistRow extends StatelessWidget {
                       child: Row(
                         children: [
                           IconTile(
-                            icon: iconFor(icon),
+                            iconKey: icon,
                             color: checked
                                 ? colors.accent
                                 : colors.surfaceRaised,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -7,6 +8,7 @@ import 'package:before_i_leave/app/theme.dart';
 import 'package:before_i_leave/domain/app_controller.dart';
 import 'package:before_i_leave/domain/models.dart';
 import 'package:before_i_leave/platform/leave_gateway.dart';
+import 'package:before_i_leave/ui/components.dart';
 import 'package:before_i_leave/ui/today_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -67,11 +69,11 @@ void main() {
         )
         .first;
     await tester.scrollUntilVisible(
-      find.text('READY YET?  ·  1.0.2'),
+      find.text('READY YET?  ·  1.0.3'),
       320,
       scrollable: settingsScrollable,
     );
-    expect(find.text('READY YET?  ·  1.0.2'), findsOneWidget);
+    expect(find.text('READY YET?  ·  1.0.3'), findsOneWidget);
     expect(find.text('Before I Leave'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -85,7 +87,13 @@ void main() {
       final controller = await _controller(onboarded: true);
       tester.view.physicalSize = const Size(360, 800);
       tester.view.devicePixelRatio = 1;
-      await tester.pumpWidget(BeforeILeaveApp(controller: controller));
+      tester.platformDispatcher.textScaleFactorTestValue = 1;
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: const ValueKey<String>('screen_capture'),
+          child: BeforeILeaveApp(controller: controller),
+        ),
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('School'));
@@ -109,9 +117,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.state.outings.single.isComplete, isTrue);
       expect(find.text('Ready to go.'), findsOneWidget);
+      expect(find.text('Back to home'), findsOneWidget);
+      expect(find.text('Reopen outing'), findsOneWidget);
+      await _saveScreenshot(tester, 'completion_360_light');
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await tester.pumpAndSettle();
+      await _saveScreenshot(tester, 'completion_360_large_text');
+      expect(tester.takeException(), isNull);
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
+      expect(controller.state.outings.single.isComplete, isTrue);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
       await tester.tap(find.text('History'));
       await tester.pumpAndSettle();
       expect(find.text('Good to go.'), findsOneWidget);
@@ -122,6 +142,551 @@ void main() {
       controller.dispose();
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.textScaleFactorTestValue = 1;
+    },
+  );
+
+  testWidgets(
+    'ID card and Perfume choices stay accessible and save to the outing snapshot',
+    (tester) async {
+      final gateway = _GatedGateway(
+        storedJson: jsonEncode(
+          AppState.initial()
+              .copyWith(
+                settings: const AppSettings(
+                  onboarded: true,
+                  reducedMotion: true,
+                ),
+              )
+              .toJson(),
+        ),
+      );
+      final controller = await _controller(onboarded: true, gateway: gateway);
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetViewInsets();
+        tester.platformDispatcher.textScaleFactorTestValue = 1;
+        controller.dispose();
+      });
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: const ValueKey<String>('screen_capture'),
+          child: BeforeILeaveApp(controller: controller),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('School'));
+      await tester.pumpAndSettle();
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await tester.pumpAndSettle();
+      final outingId = controller.state.outings.single.id;
+      await tester.tap(find.byTooltip('Add a packing item'));
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+      await tester.pumpAndSettle();
+
+      expect(iconChoiceKeys, hasLength(26));
+      expect(iconLabel('badge'), 'ID card');
+      expect(iconLabel(''), 'Other');
+      final semantics = tester.ensureSemantics();
+      await tester.ensureVisible(find.byTooltip('ID card'));
+      await tester.ensureVisible(find.byTooltip('Perfume'));
+      final idCardNode = tester.getSemantics(
+        find.bySemanticsLabel('ID card icon'),
+      );
+      final perfumeNode = tester.getSemantics(
+        find.bySemanticsLabel('Perfume icon'),
+      );
+      expect(
+        idCardNode.getSemanticsData().hasAction(SemanticsAction.tap),
+        isTrue,
+      );
+      expect(
+        perfumeNode.getSemanticsData().hasAction(SemanticsAction.tap),
+        isTrue,
+      );
+      expect(find.byTooltip('Perfume'), findsOneWidget);
+      await tester.tap(find.byTooltip('ID card'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField).first, 'ID card');
+      await tester.ensureVisible(find.text('Save item'));
+      gateway.holdNextWrite();
+      await tester.tap(find.text('Save item'));
+      await tester.pump();
+      await gateway.writeStarted!.future;
+      await tester.pump();
+      gateway.releaseWrite();
+      await controller.waitForSaves();
+      await tester.pumpAndSettle();
+
+      final outing = controller.state.outings.singleWhere(
+        (value) => value.id == outingId,
+      );
+      expect(
+        outing.items.singleWhere((item) => item.label == 'ID card').iconKey,
+        'badge',
+      );
+
+      tester.view.viewInsets = FakeViewPadding.zero;
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add a packing item'));
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Perfume'));
+      await tester.tap(find.byTooltip('Perfume'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<AnimatedContainer>(
+              find.descendant(
+                of: find.byTooltip('Perfume'),
+                matching: find.byType(AnimatedContainer),
+              ),
+            )
+            .duration,
+        Duration.zero,
+      );
+      expect(
+        tester
+            .getSemantics(find.bySemanticsLabel('Perfume icon'))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+      );
+      await _saveScreenshot(tester, 'icons_picker_360_large_text_keyboard');
+
+      await tester.enterText(find.byType(TextField).first, 'Perfume');
+      await tester.ensureVisible(find.text('Save item'));
+      gateway.holdNextWrite();
+      await tester.tap(find.text('Save item'));
+      await tester.pump();
+      await gateway.writeStarted!.future;
+      await tester.pump();
+
+      final pendingPerfumeNode = tester.getSemantics(
+        find.bySemanticsLabel('Perfume icon'),
+      );
+      expect(
+        pendingPerfumeNode.getSemanticsData().hasAction(SemanticsAction.tap),
+        isFalse,
+      );
+      expect(
+        pendingPerfumeNode.getSemanticsData().flagsCollection.isEnabled,
+        ui.Tristate.isFalse,
+      );
+      expect(
+        controller.state.outings
+            .singleWhere((outing) => outing.id == outingId)
+            .items
+            .where((item) => item.label == 'Perfume'),
+        hasLength(1),
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(
+        controller.state.outings
+            .singleWhere((outing) => outing.id == outingId)
+            .items
+            .where((item) => item.label == 'Perfume'),
+        hasLength(1),
+      );
+
+      gateway.releaseWrite();
+      await controller.waitForSaves();
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = FakeViewPadding.zero;
+      final perfume = controller.state.outings
+          .singleWhere((outing) => outing.id == outingId)
+          .items
+          .singleWhere((item) => item.label == 'Perfume');
+      expect(perfume.iconKey, 'perfume');
+      final saved = AppState.fromJson(
+        jsonDecode(gateway.storedJson!) as Map<String, Object?>,
+      ).outings.singleWhere((outing) => outing.id == outingId);
+      expect(
+        saved.items.singleWhere((item) => item.label == 'Perfume').iconKey,
+        'perfume',
+      );
+      expect(
+        saved.items.singleWhere((item) => item.label == 'ID card').iconKey,
+        'badge',
+      );
+
+      tester.view.physicalSize = const Size(430, 900);
+      await tester.pumpAndSettle();
+      final packScrollable = find.descendant(
+        of: find.byKey(const PageStorageKey<String>('pack')),
+        matching: find.byType(Scrollable),
+      );
+      await tester.scrollUntilVisible(
+        find.text('Perfume'),
+        220,
+        scrollable: packScrollable.first,
+      );
+      await tester.scrollUntilVisible(
+        find.text('ID card'),
+        220,
+        scrollable: packScrollable.first,
+      );
+      final perfumeRow = find.ancestor(
+        of: find.text('Perfume'),
+        matching: find.byType(ChecklistRow),
+      );
+      expect(
+        find.descendant(of: perfumeRow, matching: find.byType(ItemGlyph)),
+        findsOneWidget,
+      );
+      final perfumeGlyph = find.descendant(
+        of: perfumeRow,
+        matching: find.byType(ItemGlyph),
+      );
+      final perfumePaint = find.descendant(
+        of: perfumeGlyph,
+        matching: find.byType(CustomPaint),
+      );
+      expect(tester.getSize(perfumePaint).width, closeTo(44 * .48, .01));
+      expect(tester.getSize(perfumePaint).height, closeTo(44 * .48, .01));
+      tester.view.viewInsets = FakeViewPadding.zero;
+      await tester.pumpAndSettle();
+      await _saveScreenshot(tester, 'carry_icon_rows_430_large_text');
+      final idCardRow = find.ancestor(
+        of: find.text('ID card'),
+        matching: find.byType(ChecklistRow),
+      );
+      expect(
+        find.descendant(of: idCardRow, matching: find.byType(ItemGlyph)),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      tester.view.physicalSize = const Size(360, 800);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add a packing item'));
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Perfume'));
+      await tester.tap(find.byTooltip('Perfume'));
+      await tester.pumpAndSettle();
+      await _saveScreenshot(
+        tester,
+        'icons_picker_360_dark_large_text_keyboard',
+      );
+      tester.view.viewInsets = FakeViewPadding.zero;
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('editing a legacy keys item keeps its persisted icon key', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    final controller = await _controller(onboarded: true);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      controller.dispose();
+    });
+    await controller.addBlueprintItem(
+      'school',
+      label: 'Keys backup',
+      iconKey: 'keys',
+    );
+    await controller.waitForSaves();
+    await tester.pumpWidget(BeforeILeaveApp(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lists'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('School').first);
+    await tester.pumpAndSettle();
+    final itemLabel = find.text('Keys backup');
+    await tester.scrollUntilVisible(
+      itemLabel,
+      220,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView).last,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(itemLabel);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit item'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Key'), findsOneWidget);
+    expect(find.byTooltip('Keys'), findsNothing);
+    final semantics = tester.ensureSemantics();
+    final keyNode = tester.getSemantics(find.bySemanticsLabel('Key icon'));
+    expect(
+      keyNode.getSemanticsData().flagsCollection.isSelected,
+      ui.Tristate.isTrue,
+    );
+    await tester.tap(find.text('Save item'));
+    await tester.pumpAndSettle();
+
+    expect(
+      controller.state.blueprints
+          .singleWhere((blueprint) => blueprint.id == 'school')
+          .items
+          .singleWhere((item) => item.label == 'Keys backup')
+          .iconKey,
+      'keys',
+    );
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'completed outing Home returns to Today and reopening retains checkmarks',
+    (tester) async {
+      final gateway = _GatedGateway(
+        storedJson: jsonEncode(
+          AppState.initial()
+              .copyWith(
+                settings: const AppSettings(
+                  onboarded: true,
+                  reducedMotion: true,
+                ),
+              )
+              .toJson(),
+        ),
+      );
+      final controller = await _controller(onboarded: true, gateway: gateway);
+      final outingId = await controller.startOuting('school');
+      for (final item in controller.state.outings.single.items) {
+        await controller.setOutingItemChecked(outingId, item.id, checked: true);
+      }
+      await controller.finishOuting(outingId);
+      await controller.waitForSaves();
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(BeforeILeaveApp(controller: controller));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
+      );
+
+      final cardTitle = find.descendant(
+        of: find.byKey(ValueKey<String>('history-$outingId')),
+        matching: find.text('School'),
+      );
+      await tester.tap(cardTitle);
+      await tester.pumpAndSettle();
+      expect(find.text("You're ready."), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(controller.state.outings.single.isComplete, isTrue);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
+      );
+
+      await tester.tap(cardTitle);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Back to home'));
+      await tester.pumpAndSettle();
+      expect(controller.state.outings.single.isComplete, isTrue);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
+
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+      final reopenedCardTitle = find.descendant(
+        of: find.byKey(ValueKey<String>('history-$outingId')),
+        matching: find.text('School'),
+      );
+      await tester.tap(reopenedCardTitle);
+      await tester.pumpAndSettle();
+      gateway.holdNextWrite();
+      await tester.tap(find.text('Reopen outing'));
+      await tester.pump();
+      await gateway.writeStarted!.future;
+      await tester.pump();
+      expect(find.text('Reopening…'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text("You're ready."), findsOneWidget);
+      expect(find.byTooltip('Add a packing item'), findsNothing);
+      expect(controller.canonicalState.outings.single.isComplete, isTrue);
+      gateway.releaseWrite();
+      await controller.waitForSaves();
+      await tester.pumpAndSettle();
+
+      final reopened = controller.state.outings.single;
+      expect(reopened.id, outingId);
+      expect(reopened.isComplete, isFalse);
+      expect(reopened.items.every((item) => item.checked), isTrue);
+      expect(find.text('Let’s pack.'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(controller.state.outings.single.isComplete, isFalse);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      controller.dispose();
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    },
+  );
+
+  testWidgets(
+    'failed pack and history reopens keep the canonical completed outing',
+    (tester) async {
+      final initial = AppState.initial().copyWith(
+        settings: const AppSettings(onboarded: true),
+      );
+      final gateway = FakeLeaveGateway(
+        storedJson: jsonEncode(initial.toJson()),
+      );
+      final controller = await _controller(onboarded: true, gateway: gateway);
+      final outingId = await controller.startOuting('school');
+      for (final item in controller.state.outings.single.items) {
+        await controller.setOutingItemChecked(outingId, item.id, checked: true);
+      }
+      await controller.finishOuting(outingId);
+      await controller.waitForSaves();
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(BeforeILeaveApp(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey<String>('history-$outingId')),
+          matching: find.text('School'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      gateway.failWrites = true;
+      await tester.tap(find.text('Reopen outing'));
+      await controller.waitForSaves();
+      await tester.pumpAndSettle();
+      expect(controller.state.outings.single.isComplete, isTrue);
+      expect(
+        controller.state.outings.single.items.every((item) => item.checked),
+        isTrue,
+      );
+      expect(find.text("You're ready."), findsOneWidget);
+      expect(find.text('Reopen outing'), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Good to go.'), findsOneWidget);
+      await tester.tap(find.text('Reopen outing'));
+      await controller.waitForSaves();
+      await tester.pumpAndSettle();
+      expect(controller.state.outings.single.isComplete, isTrue);
+      expect(
+        controller.state.outings.single.items.every((item) => item.checked),
+        isTrue,
+      );
+      expect(find.text('Good to go.'), findsOneWidget);
+      expect(find.byKey(ValueKey<String>('history-$outingId')), findsOneWidget);
+
+      final restored = AppState.fromJson(
+        jsonDecode(gateway.storedJson!) as Map<String, Object?>,
+      ).outings.single;
+      expect(restored.isComplete, isTrue);
+      expect(restored.items.every((item) => item.checked), isTrue);
+
+      gateway.failWrites = false;
+      await controller.retrySave();
+      await controller.waitForSaves();
+      expect(controller.state.outings.single.isComplete, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      controller.dispose();
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    },
+  );
+
+  testWidgets(
+    'pending History reopen cannot open the card or navigate after leaving History',
+    (tester) async {
+      final initial = AppState.initial().copyWith(
+        settings: const AppSettings(onboarded: true),
+      );
+      final gateway = _GatedGateway(storedJson: jsonEncode(initial.toJson()));
+      final controller = await _controller(onboarded: true, gateway: gateway);
+      final outingId = await controller.startOuting('school');
+      for (final item in controller.state.outings.single.items) {
+        await controller.setOutingItemChecked(outingId, item.id, checked: true);
+      }
+      await controller.finishOuting(outingId);
+      await controller.waitForSaves();
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        controller.dispose();
+      });
+      await tester.pumpWidget(BeforeILeaveApp(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+
+      gateway.holdNextWrite();
+      await tester.tap(find.text('Reopen outing'));
+      await gateway.writeStarted!.future;
+      await tester.pump();
+      final card = find.byKey(ValueKey<String>('history-$outingId'));
+      final cardTap = find
+          .descendant(of: card, matching: find.byType(InkWell))
+          .first;
+      expect(tester.widget<InkWell>(cardTap).onTap, isNull);
+      await tester.tap(
+        find.descendant(of: card, matching: find.text('School')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Let’s pack.'), findsNothing);
+
+      await tester.tap(find.text('Today'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
+      gateway.releaseWrite();
+      await controller.waitForSaves();
+      await tester.pumpAndSettle();
+
+      expect(controller.state.outings, hasLength(1));
+      expect(controller.state.outings.single.isActive, isTrue);
+      expect(find.text('Let’s pack.'), findsNothing);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
     },
   );
 
@@ -1175,6 +1740,13 @@ void main() {
 
       final history = await _controller(onboarded: true);
       final outingId = await history.startOuting('trip');
+      final firstHistoryItem = history.state.outings.single.items.first;
+      await history.updateOutingItem(
+        outingId,
+        firstHistoryItem.id,
+        label: 'Perfume',
+        iconKey: 'perfume',
+      );
       for (final item in history.state.outings.single.items) {
         await history.setOutingItemChecked(outingId, item.id, checked: true);
       }
@@ -1189,9 +1761,24 @@ void main() {
       );
       await tester.tap(find.text('History'));
       await tester.pumpAndSettle();
+      final historyCard = find.byKey(ValueKey<String>('history-$outingId'));
+      final historyPerfume = find.descendant(
+        of: historyCard,
+        matching: find.byWidgetPredicate(
+          (widget) => widget is ItemGlyph && widget.iconKey == 'perfume',
+        ),
+      );
+      expect(historyPerfume, findsOneWidget);
+      final historyPerfumePaint = find.descendant(
+        of: historyPerfume,
+        matching: find.byType(CustomPaint),
+      );
+      expect(tester.getSize(historyPerfumePaint).width, closeTo(14, .01));
+      expect(tester.getSize(historyPerfumePaint).height, closeTo(14, .01));
       await _saveScreenshot(tester, 'history_completed_430_light');
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
       await tester.pumpAndSettle();
+      await _saveScreenshot(tester, 'history_completed_430_dark');
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       await _saveScreenshot(tester, 'settings_430_dark');
@@ -1206,7 +1793,7 @@ void main() {
           )
           .first;
       await tester.scrollUntilVisible(
-        find.text('READY YET?  ·  1.0.2'),
+        find.text('READY YET?  ·  1.0.3'),
         220,
         scrollable: settingsScrollable,
       );
@@ -1609,12 +2196,16 @@ void main() {
   );
 }
 
-Future<AppController> _controller({required bool onboarded}) async {
+Future<AppController> _controller({
+  required bool onboarded,
+  FakeLeaveGateway? gateway,
+}) async {
   final initial = AppState.initial().copyWith(
     settings: AppSettings(onboarded: onboarded),
   );
   final controller = AppController(
-    gateway: FakeLeaveGateway(storedJson: jsonEncode(initial.toJson())),
+    gateway:
+        gateway ?? FakeLeaveGateway(storedJson: jsonEncode(initial.toJson())),
   );
   await controller.initialize();
   return controller;
@@ -1651,7 +2242,9 @@ Future<void> _saveScreenshot(WidgetTester tester, String name) async {
     try {
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data == null) throw StateError('Could not encode render $name');
-      final file = File('qa/screenshots/$name.png');
+      final directory =
+          Platform.environment['READY_YET_QA_CAPTURE_DIR'] ?? 'qa/screenshots';
+      final file = File('$directory/$name.png');
       await file.parent.create(recursive: true);
       await file.writeAsBytes(data.buffer.asUint8List());
     } finally {
@@ -1709,5 +2302,41 @@ Future<void> _loadRenderFonts() async {
     await (FontLoader(
       'MaterialIcons',
     )..addFont(Future<ByteData>.value(ByteData.sublistView(bytes)))).load();
+  }
+}
+
+class _GatedGateway extends FakeLeaveGateway {
+  _GatedGateway({required super.storedJson});
+
+  Completer<void>? writeStarted;
+  Completer<void>? _release;
+  bool _holdNext = false;
+
+  void holdNextWrite() {
+    _holdNext = true;
+    writeStarted = Completer<void>();
+    _release = Completer<void>();
+  }
+
+  void releaseWrite() => _release!.complete();
+
+  @override
+  Future<String> writeState({
+    required String baseJson,
+    required String targetJson,
+    required List<Map<String, Object?>> checkIntents,
+    required List<Map<String, Object?>> lifecycleIntents,
+  }) async {
+    if (_holdNext) {
+      _holdNext = false;
+      writeStarted!.complete();
+      await _release!.future;
+    }
+    return super.writeState(
+      baseJson: baseJson,
+      targetJson: targetJson,
+      checkIntents: checkIntents,
+      lifecycleIntents: lifecycleIntents,
+    );
   }
 }

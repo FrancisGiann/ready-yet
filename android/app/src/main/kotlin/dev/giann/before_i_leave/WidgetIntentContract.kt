@@ -126,6 +126,7 @@ internal object WidgetIntentContract {
 
     fun consume(context: Context, intent: Intent?): String? {
         val current = intent ?: return null
+        if (current.action == ChecklistScheduleScheduler.OPEN) return ChecklistScheduleScheduler.consumeOpen(context, current)
         if (current.action == MainActivity.ACTION_PACK_TODAY) {
             current.action = null
             return "pack_today"

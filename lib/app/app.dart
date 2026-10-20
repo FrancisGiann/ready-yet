@@ -86,29 +86,30 @@ class _BeforeILeaveAppState extends State<BeforeILeaveApp> {
             : settings.appearance == 'light'
             ? ThemeMode.light
             : ThemeMode.system,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            disableAnimations:
+                MediaQuery.disableAnimationsOf(context) ||
+                settings.reducedMotion,
+          ),
+          child: child ?? const SizedBox.shrink(),
+        ),
         home: !_controller.isReady
             ? const _LoadingScreen()
-            : MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  disableAnimations:
-                      MediaQuery.disableAnimationsOf(context) ||
-                      settings.reducedMotion,
+            : !_controller.canEdit
+            ? _RecoveryScreen(controller: _controller)
+            : !settings.onboarded
+            ? OnboardingScreen(
+                onDone: () => unawaited(
+                  _controller.updateSettings(
+                    settings.copyWith(onboarded: true),
+                  ),
                 ),
-                child: !_controller.canEdit
-                    ? _RecoveryScreen(controller: _controller)
-                    : !settings.onboarded
-                    ? OnboardingScreen(
-                        onDone: () => unawaited(
-                          _controller.updateSettings(
-                            settings.copyWith(onboarded: true),
-                          ),
-                        ),
-                      )
-                    : HomeShell(
-                        controller: _controller,
-                        launchAction: _pendingLaunchAction,
-                        onLaunchActionHandled: _clearLaunchAction,
-                      ),
+              )
+            : HomeShell(
+                controller: _controller,
+                launchAction: _pendingLaunchAction,
+                onLaunchActionHandled: _clearLaunchAction,
               ),
       );
     },
@@ -218,7 +219,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       final outing = widget.controller.state.outings
           .where((value) => value.id == outingId)
           .firstOrNull;
-      if (outing == null || !outing.isActive) {
+      if (outing == null ||
+          (!outing.isActive &&
+              !(outing.scheduleId != null && outing.isComplete))) {
         _showLaunchMessage('That outing is no longer available.');
         return;
       }
@@ -236,7 +239,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Outing? _latestActiveOuting() {
     final active =
         widget.controller.state.outings
-            .where((outing) => outing.isActive)
+            .where(
+              (outing) =>
+                  outing.isActive &&
+                  (outing.scheduleId == null ||
+                      outing.date == localDateKey(DateTime.now())),
+            )
             .toList()
           ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
     return active.firstOrNull;
@@ -265,12 +273,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _replacePackRoute(id);
   }
 
+  void _openHistoryOuting(String id) {
+    if (_tab != 2 || Navigator.of(context).canPop()) return;
+    _openOuting(id);
+  }
+
   void _replacePackRoute(String id) {
     final navigator = Navigator.of(context);
     navigator.popUntil((route) => route.isFirst);
     navigator.push(
       MaterialPageRoute<void>(
-        builder: (_) => PackScreen(controller: widget.controller, outingId: id),
+        builder: (_) => PackScreen(
+          controller: widget.controller,
+          outingId: id,
+          onBackToHome: _returnToToday,
+        ),
       ),
     );
   }
@@ -287,8 +304,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ListsScreen(controller: widget.controller),
       HistoryScreen(
         controller: widget.controller,
-        openOuting: _openOuting,
+        openOuting: _openHistoryOuting,
         goToToday: () => setState(() => _tab = 0),
+        navigationGeneration: _navigationGeneration,
       ),
       SettingsScreen(controller: widget.controller),
     ];

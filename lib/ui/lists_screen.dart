@@ -162,11 +162,7 @@ class _BlueprintSummary extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              IconTile(
-                icon: iconFor(blueprint.iconKey),
-                color: swatch,
-                size: 52,
-              ),
+              IconTile(iconKey: blueprint.iconKey, color: swatch, size: 52),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
@@ -282,7 +278,7 @@ class BlueprintEditorScreen extends StatelessWidget {
                         Row(
                           children: [
                             IconTile(
-                              icon: iconFor(blueprint.iconKey),
+                              iconKey: blueprint.iconKey,
                               color: _blueprintColor(
                                 context,
                                 blueprint.colorIndex,
@@ -474,7 +470,7 @@ class BlueprintEditorScreen extends StatelessWidget {
                                 child: Row(
                                   children: [
                                     IconTile(
-                                      icon: iconFor(extra.iconKey),
+                                      iconKey: extra.iconKey,
                                       color: context.appColors.peach,
                                       size: 42,
                                     ),
@@ -562,7 +558,7 @@ class BlueprintEditorScreen extends StatelessWidget {
             children: [
               ListTile(
                 leading: IconTile(
-                  icon: iconFor(item.iconKey),
+                  iconKey: item.iconKey,
                   color: context.appColors.sky,
                   size: 45,
                 ),

@@ -53,11 +53,25 @@ abstract interface class LeaveGateway {
 
 /// Android platform implementation. The channel is intentionally the only
 /// native boundary used by the domain controller.
-class MethodChannelLeaveGateway implements LeaveGateway {
+abstract interface class SchedulePermissionGateway {
+  Future<bool> openPreciseReminderSettings();
+  Future<bool> openNotificationSettings();
+}
+
+class MethodChannelLeaveGateway
+    implements LeaveGateway, SchedulePermissionGateway {
   MethodChannelLeaveGateway({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(channelName) {
     _channel.setMethodCallHandler(_handleMethodCall);
   }
+
+  @override
+  Future<bool> openPreciseReminderSettings() async =>
+      await _channel.invokeMethod<bool>('openPreciseReminderSettings') ?? false;
+
+  @override
+  Future<bool> openNotificationSettings() async =>
+      await _channel.invokeMethod<bool>('openNotificationSettings') ?? false;
 
   static const channelName = 'dev.giann.before_i_leave/native';
   final MethodChannel _channel;
@@ -313,8 +327,25 @@ class FakeLeaveGateway implements LeaveGateway {
     final currentOutings = {
       for (final outing in current.outings) outing.id: outing,
     };
-    final canonicalOutings = target.outings.map((targetOuting) {
-      final currentOuting = currentOutings[targetOuting.id];
+    final baseOutings = {for (final outing in base.outings) outing.id: outing};
+    String snapshot(Outing outing) => jsonEncode([
+      outing.id,
+      outing.scheduleId,
+      outing.blueprintId,
+      outing.blueprintName,
+      outing.date,
+      outing.startedAt.toIso8601String(),
+      for (final item in outing.items) [item.id, item.label, item.iconKey],
+    ]);
+    final canonicalOutings = target.outings.map((requestedOuting) {
+      final currentOuting = currentOutings[requestedOuting.id];
+      final previous = baseOutings[requestedOuting.id];
+      final targetOuting =
+          currentOuting?.scheduleId != null &&
+              (previous == null ||
+                  snapshot(previous) == snapshot(requestedOuting))
+          ? currentOuting!
+          : requestedOuting;
       final items = targetOuting.items.map((targetItem) {
         final key = _itemKey(targetOuting.id, targetItem.id);
         final currentItem = currentOuting?.items
@@ -344,6 +375,12 @@ class FakeLeaveGateway implements LeaveGateway {
       }
       return canonical;
     }).toList();
+    final ids = canonicalOutings.map((outing) => outing.id).toSet();
+    canonicalOutings.addAll(
+      current.outings.where(
+        (outing) => outing.scheduleId != null && !ids.contains(outing.id),
+      ),
+    );
     final canonical = target.copyWith(outings: canonicalOutings);
     _nativeRevision++;
     final envelope = _withMetadata(canonical, _storageEpoch, _nativeRevision);

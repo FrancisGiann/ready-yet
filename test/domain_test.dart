@@ -180,6 +180,238 @@ void main() {
       expect(restored.state.settings.reminderMinute, 15);
     });
 
+    test('icon keys copy through outings and a completed list starts a fresh outing', () async {
+      await controller.addBlueprintItem(
+        'school',
+        label: 'Perfume',
+        iconKey: 'perfume',
+      );
+      await controller.addBlueprintItem(
+        'school',
+        label: 'Legacy keepsake',
+        iconKey: 'legacy keepsake',
+      );
+      final finishedId = await controller.startOuting('school');
+      final finishedItems = controller.state.outings
+          .singleWhere((outing) => outing.id == finishedId)
+          .items;
+      expect(
+        finishedItems.map((item) => (item.label, item.iconKey)),
+        containsAll([
+          ('Perfume', 'perfume'),
+          ('Legacy keepsake', 'legacy keepsake'),
+        ]),
+      );
+
+      for (final item in finishedItems) {
+        await controller.setOutingItemChecked(
+          finishedId,
+          item.id,
+          checked: true,
+        );
+      }
+      await controller.finishOuting(finishedId);
+      final freshId = await controller.startOuting('school');
+      await controller.waitForSaves();
+
+      final finished = controller.state.outings.singleWhere(
+        (outing) => outing.id == finishedId,
+      );
+      final fresh = controller.state.outings.singleWhere(
+        (outing) => outing.id == freshId,
+      );
+      expect(freshId, isNot(finishedId));
+      expect(finished.isComplete, isTrue);
+      expect(finished.items.every((item) => item.checked), isTrue);
+      expect(fresh.isActive, isTrue);
+      expect(fresh.items.every((item) => !item.checked), isTrue);
+
+      final restored = AppState.fromJson(
+        jsonDecode(gateway.storedJson!) as Map<String, Object?>,
+      );
+      final savedBlueprint = restored.blueprints.singleWhere(
+        (blueprint) => blueprint.id == 'school',
+      );
+      expect(
+        savedBlueprint.items.map((item) => item.iconKey),
+        containsAll(['perfume', 'legacy keepsake']),
+      );
+      expect(
+        restored.outings
+            .singleWhere((outing) => outing.id == finishedId)
+            .items
+            .map((item) => item.iconKey),
+        containsAll(['perfume', 'legacy keepsake']),
+      );
+      expect(
+        restored.outings
+            .singleWhere((outing) => outing.id == finishedId)
+            .isComplete,
+        isTrue,
+      );
+    });
+
+    test(
+      'failed undo finish restores completion and remains retryable',
+      () async {
+        final outingId = await controller.startOuting('school');
+        for (final item in controller.state.outings.single.items) {
+          await controller.setOutingItemChecked(
+            outingId,
+            item.id,
+            checked: true,
+          );
+        }
+        await controller.finishOuting(outingId);
+        await controller.waitForSaves();
+        final finishedAt = controller.state.outings.single.completedAt;
+
+        gateway.failWrites = true;
+        await expectLater(controller.undoFinish(outingId), throwsStateError);
+        await controller.waitForSaves();
+        expect(controller.state.outings.single.isComplete, isTrue);
+        expect(controller.state.outings.single.completedAt, finishedAt);
+        expect(
+          controller.state.outings.single.items.every((item) => item.checked),
+          isTrue,
+        );
+        expect(controller.saveError, isNotNull);
+
+        final restoredFromStorage = createController(
+          FakeLeaveGateway(storedJson: gateway.storedJson),
+        );
+        addTearDown(restoredFromStorage.dispose);
+        await restoredFromStorage.initialize();
+        expect(restoredFromStorage.state.outings.single.isComplete, isTrue);
+        expect(
+          restoredFromStorage.state.outings.single.items.every(
+            (item) => item.checked,
+          ),
+          isTrue,
+        );
+
+        gateway.failWrites = false;
+        await controller.retrySave();
+        await controller.waitForSaves();
+        expect(controller.state.outings.single.isComplete, isTrue);
+        expect(controller.saveError, isNull);
+      },
+    );
+
+    test(
+      'failed reopen retires its intent before a queued settings write',
+      () async {
+        final outingId = await controller.startOuting('school');
+        for (final item in controller.state.outings.single.items) {
+          await controller.setOutingItemChecked(
+            outingId,
+            item.id,
+            checked: true,
+          );
+        }
+        await controller.finishOuting(outingId);
+        await controller.waitForSaves();
+        final completedAt = controller.state.outings.single.completedAt;
+
+        final storage = _DelayedFailWriteGateway(
+          storedJson: gateway.storedJson,
+        );
+        final slow = createController(storage);
+        addTearDown(slow.dispose);
+        await slow.initialize();
+        storage.holdNextWrite();
+        final reopen = slow.undoFinish(outingId);
+        await storage.writeStarted!.future;
+        final settings = slow.updateSettings(
+          slow.state.settings.copyWith(appearance: 'dark'),
+        );
+        storage.releaseWrite();
+
+        await expectLater(reopen, throwsStateError);
+        await settings;
+        await slow.waitForSaves();
+
+        expect(storage.attempts, 2);
+        expect(storage.writeTransactions, hasLength(1));
+        expect(storage.writeTransactions.single['lifecycleIntents'], isEmpty);
+        expect(slow.state.settings.appearance, 'dark');
+        expect(slow.state.outings.single.isComplete, isTrue);
+        expect(slow.state.outings.single.completedAt, completedAt);
+        final persisted = AppState.fromJson(
+          jsonDecode(storage.storedJson!) as Map<String, Object?>,
+        ).outings.single;
+        expect(persisted.isComplete, isTrue);
+        expect(persisted.completedAt, completedAt);
+        expect(persisted.items.every((item) => item.checked), isTrue);
+      },
+    );
+
+    test('failed reopen does not overwrite a newer dismissal', () async {
+      final outingId = await controller.startOuting('school');
+      for (final item in controller.state.outings.single.items) {
+        await controller.setOutingItemChecked(outingId, item.id, checked: true);
+      }
+      await controller.finishOuting(outingId);
+      await controller.waitForSaves();
+
+      final storage = _DelayedFailWriteGateway(storedJson: gateway.storedJson);
+      final slow = createController(storage);
+      addTearDown(slow.dispose);
+      await slow.initialize();
+      storage.holdNextWrite();
+      final reopen = slow.undoFinish(outingId);
+      await storage.writeStarted!.future;
+      final dismiss = slow.dismissOuting(outingId);
+      storage.releaseWrite();
+
+      await expectLater(reopen, throwsStateError);
+      await dismiss;
+      await slow.waitForSaves();
+
+      expect(storage.attempts, 2);
+      expect(slow.state.outings.single.isDismissed, isTrue);
+      expect(slow.state.outings.single.isComplete, isFalse);
+      final persisted = AppState.fromJson(
+        jsonDecode(storage.storedJson!) as Map<String, Object?>,
+      ).outings.single;
+      expect(persisted.isDismissed, isTrue);
+      expect(persisted.isComplete, isFalse);
+    });
+
+    test('failed reopen does not restore an undurable queued finish', () async {
+      final outingId = await controller.startOuting('school');
+      for (final item in controller.state.outings.single.items) {
+        await controller.setOutingItemChecked(outingId, item.id, checked: true);
+      }
+      await controller.waitForSaves();
+
+      final storage = _DelayedFailWriteGateway(storedJson: gateway.storedJson);
+      final slow = createController(storage);
+      addTearDown(slow.dispose);
+      await slow.initialize();
+      storage.holdNextWrite();
+      final finish = slow.finishOuting(outingId);
+      await storage.writeStarted!.future;
+      storage.failSubsequentWrites = true;
+      final reopen = slow.undoFinish(outingId);
+      storage.releaseWrite();
+
+      await expectLater(finish, throwsStateError);
+      await expectLater(reopen, throwsStateError);
+      await slow.waitForSaves();
+
+      expect(slow.state.outings.single.isComplete, isFalse);
+      expect(
+        slow.state.outings.single.items.every((item) => item.checked),
+        isTrue,
+      );
+      final persisted = AppState.fromJson(
+        jsonDecode(storage.storedJson!) as Map<String, Object?>,
+      ).outings.single;
+      expect(persisted.isComplete, isFalse);
+      expect(persisted.items.every((item) => item.checked), isTrue);
+    });
+
     test('corrupt state falls back and can be saved again', () async {
       final brokenStorage = FakeLeaveGateway(storedJson: '{broken json');
       final recovered = createController(brokenStorage);
@@ -1432,6 +1664,49 @@ class _BlockingGateway extends FakeLeaveGateway {
     if (attempts.length == 2 && holdSecondWrite) {
       secondWriteStarted.complete();
       await releaseSecondWrite.future;
+    }
+    return super.writeState(
+      baseJson: baseJson,
+      targetJson: targetJson,
+      checkIntents: checkIntents,
+      lifecycleIntents: lifecycleIntents,
+    );
+  }
+}
+
+class _DelayedFailWriteGateway extends FakeLeaveGateway {
+  _DelayedFailWriteGateway({super.storedJson});
+
+  Completer<void>? writeStarted;
+  Completer<void>? _release;
+  bool _holdNext = false;
+  bool failSubsequentWrites = false;
+  int attempts = 0;
+
+  void holdNextWrite() {
+    _holdNext = true;
+    writeStarted = Completer<void>();
+    _release = Completer<void>();
+  }
+
+  void releaseWrite() => _release!.complete();
+
+  @override
+  Future<String> writeState({
+    required String baseJson,
+    required String targetJson,
+    required List<Map<String, Object?>> checkIntents,
+    required List<Map<String, Object?>> lifecycleIntents,
+  }) async {
+    attempts++;
+    if (_holdNext) {
+      _holdNext = false;
+      writeStarted!.complete();
+      await _release!.future;
+      throw StateError('Injected delayed state write failure');
+    }
+    if (failSubsequentWrites) {
+      throw StateError('Injected subsequent state write failure');
     }
     return super.writeState(
       baseJson: baseJson,

@@ -7,6 +7,7 @@ import '../domain/app_controller.dart';
 import '../domain/models.dart';
 import 'components.dart';
 import 'home_widget_guide.dart';
+import 'schedules_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.controller});
@@ -90,6 +91,19 @@ class _SettingsScreenState extends State<SettingsScreen>
                 Text(
                   'A few small choices can make leaving easier.',
                   style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                SurfaceCard(
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.event_repeat_rounded),
+                    title: const Text('Checklist schedules'),
+                    subtitle: const Text(
+                      'Your days, departure time and reminders',
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => openSchedules(context, widget.controller),
+                  ),
                 ),
                 const SizedBox(height: 23),
                 _SectionTitle(
@@ -399,7 +413,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   child: Column(
                     children: [
                       Text(
-                        'READY YET?  ·  1.0.2',
+                        'READY YET?  ·  1.0.3',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           letterSpacing: 1.1,

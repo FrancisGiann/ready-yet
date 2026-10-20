@@ -6,6 +6,7 @@ import '../domain/app_controller.dart';
 import '../domain/models.dart';
 import '../app/theme.dart';
 import 'components.dart';
+import 'schedules_screen.dart';
 
 class TodayScreen extends StatefulWidget {
   const TodayScreen({
@@ -66,6 +67,7 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
         current.month != _today.month ||
         current.day != _today.day) {
       setState(() => _today = current);
+      unawaited(widget.controller.ensureScheduledToday());
     }
     _scheduleDayRefresh(current);
   }
@@ -86,8 +88,20 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
     builder: (context, _) {
       final state = widget.controller.state;
       final dateKey = localDateKey(_today);
-      final active = state.outings.where((outing) => outing.isActive).toList()
-        ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+      final active =
+          state.outings
+              .where(
+                (outing) =>
+                    outing.isActive &&
+                    (outing.scheduleId == null ||
+                        (outing.date == dateKey &&
+                            !state.schedules.any(
+                              (s) =>
+                                  s.id == outing.scheduleId && s.runsOn(_today),
+                            ))),
+              )
+              .toList()
+            ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
       final date = _today;
       return CustomScrollView(
         key: const PageStorageKey<String>('today'),
@@ -142,8 +156,21 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
                 const SizedBox(height: 19),
                 _DailyPanel(
                   blueprintCount: state.blueprints.length,
-                  activeCount: active.length,
+                  activeCount: state.outings
+                      .where(
+                        (outing) =>
+                            outing.isActive &&
+                            (outing.scheduleId == null ||
+                                outing.date == dateKey),
+                      )
+                      .length,
                 ),
+                if (state.schedules.any((schedule) => schedule.runsOn(_today)))
+                  TodaySchedules(
+                    controller: widget.controller,
+                    today: _today,
+                    openOuting: widget.openOuting,
+                  ),
                 if (active.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   LayoutBuilder(
@@ -308,6 +335,12 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
                         },
                       );
                     },
+                  ),
+                if (!state.schedules.any((schedule) => schedule.runsOn(_today)))
+                  TodaySchedules(
+                    controller: widget.controller,
+                    today: _today,
+                    openOuting: widget.openOuting,
                   ),
                 const SizedBox(height: 17),
                 Center(
@@ -605,7 +638,7 @@ class _BlueprintCardState extends State<_BlueprintCard> {
             Row(
               children: [
                 IconTile(
-                  icon: iconFor(widget.blueprint.iconKey),
+                  iconKey: widget.blueprint.iconKey,
                   color: _tileColor(context),
                   size: 43,
                 ),

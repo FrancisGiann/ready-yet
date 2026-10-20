@@ -3,24 +3,24 @@ import dev.giann.before_i_leave.WidgetResizePolicy;
 public final class WidgetResizePolicyCheck {
     public static void main(String[] args) {
         int[] heights = {112, 156, 200, 260, 275, 360, 480};
-        int[] checklistRows = {0, 1, 1, 3, 3, 5, 5};
+        int[] checklistRows = {1, 1, 1, 3, 3, 5, 5};
         for (int i = 0; i < heights.length; i++) {
             int height = heights[i];
             int rows = WidgetResizePolicy.checklistRows(330, height, 1f);
             boolean compact = WidgetResizePolicy.checklistUsesCompactLayout(330, height, 1f);
             expect(checklistRows[i] == rows, "checklist row budget at " + height + "dp");
-            expect(WidgetResizePolicy.checklistRequiredHeight(330, rows, 1f, compact) <= height,
+            expect(WidgetResizePolicy.checklistRequiredHeight(330, height, rows, 1f, compact) <= height,
                     "checklist content fits at " + height + "dp");
         }
 
         int[] quickHeights = {88, 112, 156, 200, 260, 275, 360, 480};
-        int[] quickRows = {0, 0, 1, 2, 3, 4, 4, 4};
+        int[] quickRows = {0, 1, 1, 2, 3, 4, 4, 4};
         for (int i = 0; i < quickHeights.length; i++) {
             int height = quickHeights[i];
             int rows = WidgetResizePolicy.quickListRows(330, height, 1f);
             boolean compact = WidgetResizePolicy.quickListsUsesCompactLayout(330, height, 1f);
             expect(quickRows[i] == rows, "quick-list row budget at " + height + "dp");
-            expect(WidgetResizePolicy.quickListsRequiredHeight(330, rows, 1f, compact) <= height,
+            expect(WidgetResizePolicy.quickListsRequiredHeight(330, height, rows, 1f, compact) <= height,
                     "quick-list content fits at " + height + "dp");
         }
 

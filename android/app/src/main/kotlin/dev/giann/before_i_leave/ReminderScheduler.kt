@@ -80,6 +80,7 @@ internal object ReminderScheduler {
             "enabled" to enabled,
             "scheduled" to (enabled && scheduledAt != null),
             "permissionGranted" to allowed,
+            "checklistSchedules" to ChecklistScheduleScheduler.status(context),
             "permissionRequired" to (Build.VERSION.SDK_INT >= 33 && !allowed),
             "reason" to when {
                 requestedButBlocked || !allowed -> unavailableReason

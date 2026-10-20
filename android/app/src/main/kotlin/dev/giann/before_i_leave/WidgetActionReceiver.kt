@@ -27,6 +27,7 @@ class WidgetActionReceiver : BroadcastReceiver() {
                 val canonical = NativeStateStore.applyWidgetItemCheck(
                     context, widgetId, generation, epoch, revision, outingId, itemId, checked, itemRevision,
                 )
+                ChecklistScheduleScheduler.refresh(context)
                 main.post {
                     runCatching { NativeStateChangeNotifier.notify(canonical) }
                         .onFailure { Log.w(TAG, "Could not notify the active app after a widget check.", it) }

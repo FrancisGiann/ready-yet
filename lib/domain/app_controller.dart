@@ -68,6 +68,13 @@ class AppController extends ChangeNotifier {
   Future<void> _readInitialState() async {
     await _loadState();
     _isReady = true;
+    if (canEdit) {
+      try {
+        await ensureScheduledToday();
+      } catch (error) {
+        _saveError = error;
+      }
+    }
     _notify();
   }
 
@@ -220,6 +227,9 @@ class AppController extends ChangeNotifier {
     if (decoded is! Map) throw const FormatException('Invalid widget action');
     final action = Map<String, Object?>.from(decoded);
     final type = action['type'];
+    if (_state.schedules.isNotEmpty || type == 'schedule_outing') {
+      await refreshExternalState();
+    }
     final requestId = action['requestId'];
     if (requestId is! String ||
         requestId.trim().isEmpty ||
@@ -227,7 +237,16 @@ class AppController extends ChangeNotifier {
       throw const FormatException('Invalid widget request ID');
     }
     final previouslyHandled = _state.widgetLaunchRequests[requestId];
-    if (previouslyHandled != null) return previouslyHandled;
+    if (previouslyHandled != null) {
+      final previous = _state.outings
+          .where((o) => o.id == previouslyHandled)
+          .firstOrNull;
+      final oldScheduledList =
+          type == 'widget_list' &&
+          previous?.scheduleId != null &&
+          previous?.date != localDateKey(_now());
+      if (!oldScheduledList) return previouslyHandled;
+    }
 
     String outingId;
     if (type == 'widget_list') {
@@ -240,17 +259,58 @@ class AppController extends ChangeNotifier {
           _state.outings
               .where(
                 (outing) =>
-                    outing.isActive && outing.blueprintId == blueprintId,
+                    outing.isActive &&
+                    outing.blueprintId == blueprintId &&
+                    (outing.scheduleId == null ||
+                        outing.date == localDateKey(_now())),
               )
               .toList()
             ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
-      if (active.isNotEmpty) {
+      final today = localDateKey(_now());
+      final scheduled =
+          _state.outings
+              .where(
+                (outing) =>
+                    outing.scheduleId != null &&
+                    outing.blueprintId == blueprintId &&
+                    outing.date == today &&
+                    _state.schedules.any(
+                      (s) => s.id == outing.scheduleId && s.enabled,
+                    ),
+              )
+              .toList()
+            ..sort((a, b) {
+              final activeOrder = (a.isActive ? 0 : 1).compareTo(
+                b.isActive ? 0 : 1,
+              );
+              return activeOrder != 0
+                  ? activeOrder
+                  : a.startedAt.compareTo(b.startedAt);
+            });
+      if (scheduled.isNotEmpty) {
+        outingId = scheduled.first.id;
+      } else if (active.isNotEmpty) {
         outingId = active.first.id;
       } else {
         final created = _createOuting(blueprintId, date: localDateKey(_now()));
         outingId = created.id;
         _state = _state.copyWith(outings: [..._state.outings, created]);
       }
+    } else if (type == 'schedule_outing') {
+      final id = action['outingId'];
+      final scheduleId = action['scheduleId'];
+      final outing = _state.outings
+          .where((outing) => outing.id == id)
+          .firstOrNull;
+      if (outing == null ||
+          !outing.isActive ||
+          outing.scheduleId != scheduleId ||
+          outing.id != 'scheduled:$scheduleId:${outing.date}') {
+        throw const FormatException(
+          'Scheduled checklist is no longer available',
+        );
+      }
+      outingId = outing.id;
     } else if (type == 'widget_outing') {
       final rawOutingId = action['outingId'];
       final rawBlueprintId = action['blueprintId'];
@@ -286,6 +346,7 @@ class AppController extends ChangeNotifier {
     final json = await _gateway.readState();
     if (json == null || json.isEmpty) return;
     _reconcileExternal(json);
+    await ensureScheduledToday();
     _notify();
   }
 
@@ -321,6 +382,9 @@ class AppController extends ChangeNotifier {
   }
 
   void _acceptCanonicalEnvelope(_StateEnvelope envelope) {
+    final previouslySavedIds = _canonicalState.outings
+        .map((outing) => outing.id)
+        .toSet();
     if (envelope.epoch == _storageEpoch) {
       if (envelope.nativeRevision >= _nativeRevision) {
         _nativeRevision = envelope.nativeRevision;
@@ -340,22 +404,34 @@ class AppController extends ChangeNotifier {
     // Successful older acknowledgements still resolve their captured intent
     // generations. Always rebase the now-clean UI from the newest cached
     // canonical state, not the potentially older response body.
-    _mergeCanonicalFieldsIntoCurrent(_canonicalState);
+    _mergeCanonicalFieldsIntoCurrent(_canonicalState, previouslySavedIds);
     _lastQueuedState = _state;
   }
 
-  void _mergeCanonicalFieldsIntoCurrent(AppState canonical) {
+  void _mergeCanonicalFieldsIntoCurrent(
+    AppState canonical,
+    Set<String> previouslySavedIds,
+  ) {
     final canonicalOutings = {
       for (final outing in canonical.outings) outing.id: outing,
     };
-    final mergedOutings = _state.outings.map((local) {
-      final remote = canonicalOutings[local.id];
-      if (remote == null) return local;
+    final mergedOutings = _state.outings.map((requested) {
+      final remote = canonicalOutings[requested.id];
+      if (remote == null) return requested;
+      final local =
+          remote.scheduleId != null && !previouslySavedIds.contains(remote.id)
+          ? remote
+          : requested;
       final mergedItems = local.items.map((localItem) {
         final key = _ItemCheckKey(local.id, localItem.id);
         if ((_checkGenerations[key] ?? 0) >
             (_ackedCheckGenerations[key] ?? 0)) {
-          return localItem;
+          final pending = requested.items
+              .where((item) => item.id == localItem.id)
+              .firstOrNull;
+          return pending == null
+              ? localItem
+              : localItem.copyWith(checked: pending.checked);
         }
         final remoteItem = remote.items
             .where((item) => item.id == localItem.id)
@@ -369,12 +445,20 @@ class AppController extends ChangeNotifier {
           (_ackedLifecycleGenerations[local.id] ?? 0);
       return local.copyWith(
         items: mergedItems,
-        completedAt: lifecycleIsDirty ? local.completedAt : remote.completedAt,
+        completedAt: lifecycleIsDirty
+            ? requested.completedAt
+            : remote.completedAt,
         dismissedAtUTC: lifecycleIsDirty
-            ? local.dismissedAtUTC
+            ? requested.dismissedAtUTC
             : remote.dismissedAtUTC,
       );
     }).toList();
+    final localIds = mergedOutings.map((outing) => outing.id).toSet();
+    mergedOutings.addAll(
+      canonical.outings.where(
+        (outing) => outing.scheduleId != null && !localIds.contains(outing.id),
+      ),
+    );
     _state = _state.copyWith(outings: mergedOutings);
   }
 
@@ -382,7 +466,9 @@ class AppController extends ChangeNotifier {
     return _queueSnapshotResult().then((_) {});
   }
 
-  Future<_SnapshotResult> _queueSnapshotResult() {
+  Future<_SnapshotResult> _queueSnapshotResult({
+    void Function(Object error)? onError,
+  }) {
     _requireWritable();
     final revision = ++_revision;
     final capturedEpoch = _storageEpoch;
@@ -433,6 +519,7 @@ class AppController extends ChangeNotifier {
         capturedResetGeneration: capturedResetGeneration,
         checks: capturedChecks,
         lifecycles: capturedLifecycles,
+        onError: onError,
       ),
       onError: (_, _) => _persistSnapshot(
         revision: revision,
@@ -442,6 +529,7 @@ class AppController extends ChangeNotifier {
         capturedResetGeneration: capturedResetGeneration,
         checks: capturedChecks,
         lifecycles: capturedLifecycles,
+        onError: onError,
       ),
     );
     _writeQueue = operation.then<void>((_) {}, onError: (_, _) {});
@@ -456,6 +544,7 @@ class AppController extends ChangeNotifier {
     required int capturedResetGeneration,
     required Map<_ItemCheckKey, _CapturedIntent> checks,
     required Map<String, _CapturedLifecycle> lifecycles,
+    void Function(Object error)? onError,
   }) async {
     final isQueuedResetStale = capturedResetGeneration != _resetGeneration;
     final isFirstWriteEpochUpgrade =
@@ -471,6 +560,7 @@ class AppController extends ChangeNotifier {
       _saveError = error;
       _loadError = error;
       _notify();
+      onError?.call(error);
       return _SnapshotResult(error: error);
     }
 
@@ -554,6 +644,7 @@ class AppController extends ChangeNotifier {
       _saveError = error;
       _notify();
       _rollbackFailedFinish(target, lifecycles, error);
+      onError?.call(error);
       return _SnapshotResult(error: error);
     }
   }
@@ -590,6 +681,103 @@ class AppController extends ChangeNotifier {
       unawaited(_queueSnapshot());
     }
     _saveError = error;
+  }
+
+  /// Creates only today's occurrences. Missed past days are not backfilled.
+  Future<void> ensureScheduledToday() async {
+    _requireWritable();
+    final now = _now();
+    final date = localDateKey(now);
+    final existing = _state.outings.map((outing) => outing.id).toSet();
+    final created = <Outing>[];
+    for (final schedule in _state.schedules) {
+      final blueprint = _state.blueprints
+          .where((b) => b.id == schedule.blueprintId)
+          .firstOrNull;
+      if (!schedule.runsOn(now) ||
+          blueprint == null ||
+          existing.contains(schedule.occurrenceId(date))) {
+        continue;
+      }
+      final items = <OutingItem>[
+        ...blueprint.items.map(
+          (i) => OutingItem(id: i.id, label: i.label, iconKey: i.iconKey),
+        ),
+        ..._state.extras
+            .where((e) => e.blueprintId == blueprint.id && e.date == date)
+            .map(
+              (e) => OutingItem(
+                id: 'extra:${e.id}',
+                label: e.label,
+                iconKey: e.iconKey,
+              ),
+            ),
+      ];
+      created.add(
+        Outing(
+          id: schedule.occurrenceId(date),
+          scheduleId: schedule.id,
+          blueprintId: blueprint.id,
+          blueprintName: blueprint.name,
+          date: date,
+          startedAt: now,
+          items: items,
+        ),
+      );
+      existing.add(schedule.occurrenceId(date));
+    }
+    if (created.isEmpty) return;
+    _state = _state.copyWith(outings: [..._state.outings, ...created]);
+    final result = await _queueSnapshotResult();
+    if (result.error != null) throw result.error!;
+  }
+
+  Future<void> saveSchedule(ChecklistSchedule schedule) async {
+    _requireWritable();
+    _blueprintIndex(schedule.blueprintId);
+    if (_state.schedules.length >= 32 &&
+        !_state.schedules.any((s) => s.id == schedule.id)) {
+      throw StateError('You can keep up to 32 schedules');
+    }
+    _state = _state.copyWith(
+      schedules: [
+        ..._state.schedules.where((s) => s.id != schedule.id),
+        schedule,
+      ],
+    );
+    final result = await _queueSnapshotResult();
+    if (result.error != null) throw result.error!;
+    await ensureScheduledToday();
+  }
+
+  Future<bool> openNotificationSettings() async {
+    final gateway = _gateway;
+    try {
+      return gateway is SchedulePermissionGateway
+          ? await (gateway as SchedulePermissionGateway)
+                .openNotificationSettings()
+          : false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String newScheduleId() => _newId();
+
+  Future<void> deleteSchedule(String id) async {
+    _requireWritable();
+    _state = _state.copyWith(
+      schedules: _state.schedules.where((s) => s.id != id),
+    );
+    final result = await _queueSnapshotResult();
+    if (result.error != null) throw result.error!;
+  }
+
+  Future<bool> openPreciseReminderSettings() async {
+    final gateway = _gateway;
+    return gateway is SchedulePermissionGateway
+        ? (gateway as SchedulePermissionGateway).openPreciseReminderSettings()
+        : false;
   }
 
   Future<String> createBlueprint({
@@ -909,16 +1097,83 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> undoFinish(String outingId) {
+  Future<void> undoFinish(String outingId) async {
     _requireWritable();
     final index = _outingIndex(outingId);
     final outing = _state.outings[index];
     if (!outing.isComplete) return Future<void>.value();
-    return _replaceOuting(
-      index,
-      outing.copyWith(completedAt: null),
-      lifecycleChange: true,
+    final outings = [..._state.outings];
+    outings[index] = outing.copyWith(completedAt: null);
+    _state = _state.copyWith(outings: outings);
+    _markLifecycleIntent(outingId);
+    final generation = _lifecycleGenerations[outingId]!;
+    final resetGeneration = _resetGeneration;
+    final result = await _queueSnapshotResult(
+      onError: (error) => _rollbackFailedUndoFinish(
+        outingId,
+        generation,
+        resetGeneration,
+        error,
+      ),
     );
+    if (result.error != null) {
+      throw result.error!;
+    }
+    final canonical = _canonicalState.outings
+        .where((value) => value.id == outingId)
+        .firstOrNull;
+    final latest = _state.outings
+        .where((value) => value.id == outingId)
+        .firstOrNull;
+    if (canonical?.isActive != true || latest?.isActive != true) {
+      final error = StateError('This outing is still finished.');
+      if (latest?.isActive == true) {
+        _rollbackFailedUndoFinish(outingId, generation, resetGeneration, error);
+      }
+      throw error;
+    }
+  }
+
+  void _rollbackFailedUndoFinish(
+    String outingId,
+    int generation,
+    int resetGeneration,
+    Object error,
+  ) {
+    if (_resetGeneration != resetGeneration ||
+        _lifecycleGenerations[outingId] != generation ||
+        generation <= (_ackedLifecycleGenerations[outingId] ?? 0)) {
+      return;
+    }
+    _ackedLifecycleGenerations[outingId] = generation;
+    final index = _state.outings.indexWhere((outing) => outing.id == outingId);
+    if (index < 0) {
+      _lastQueuedState = _state;
+      _saveError = error;
+      _notify();
+      return;
+    }
+
+    final current = _state.outings[index];
+    final canonical = _canonicalState.outings
+        .where((outing) => outing.id == outingId)
+        .firstOrNull;
+    if (canonical == null) {
+      _lastQueuedState = _state;
+      _saveError = error;
+      _notify();
+      return;
+    }
+
+    final outings = [..._state.outings];
+    outings[index] = current.copyWith(
+      completedAt: canonical.completedAt,
+      dismissedAtUTC: canonical.dismissedAtUTC,
+    );
+    _state = _state.copyWith(outings: outings);
+    _lastQueuedState = _state;
+    _notify();
+    _saveError = error;
   }
 
   /// Hides an unfinished session from active surfaces while keeping its exact
@@ -1102,6 +1357,7 @@ class AppController extends ChangeNotifier {
         ...blueprint.items.map((item) => item.id),
       ],
       for (final extra in _state.extras) extra.id,
+      for (final schedule in _state.schedules) schedule.id,
       for (final outing in _state.outings) ...[
         outing.id,
         ...outing.items.map((item) => item.id),

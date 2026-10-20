@@ -14,9 +14,11 @@ class PackScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.outingId,
+    this.onBackToHome,
   });
   final AppController controller;
   final String outingId;
+  final VoidCallback? onBackToHome;
 
   @override
   State<PackScreen> createState() => _PackScreenState();
@@ -29,6 +31,7 @@ class _PackScreenState extends State<PackScreen> {
   bool _finishAttempted = false;
   bool _finishPending = false;
   bool _finishAccepted = false;
+  bool _reopenPending = false;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -50,7 +53,9 @@ class _PackScreenState extends State<PackScreen> {
       // The controller publishes local mutations immediately. Keep the live
       // checklist visible until the awaited native merge confirms completion.
       final complete =
+          _reopenPending ||
           outing.isComplete && (!_finishAttempted || _finishAccepted);
+      final canEdit = !complete && !_finishPending;
       return Scaffold(
         appBar: AppBar(
           leading: IconButton(
@@ -65,7 +70,7 @@ class _PackScreenState extends State<PackScreen> {
           ),
           centerTitle: false,
           actions: [
-            if (!complete)
+            if (canEdit)
               IconButton(
                 tooltip: 'Add a packing item',
                 onPressed: () => _addItem(context),
@@ -180,17 +185,16 @@ class _PackScreenState extends State<PackScreen> {
                             physics: const NeverScrollableScrollPhysics(),
                             buildDefaultDragHandles: false,
                             itemCount: outing.items.length,
-                            onReorderItem: complete
-                                ? (_, _) {}
-                                : (oldIndex, newIndex) => unawaited(
-                                    controller.reorderOutingItems(
-                                      outingId,
-                                      oldIndex,
-                                      newIndex > oldIndex
-                                          ? newIndex + 1
-                                          : newIndex,
-                                    ),
-                                  ),
+                            onReorderItem: (oldIndex, newIndex) {
+                              if (!canEdit) return;
+                              unawaited(
+                                controller.reorderOutingItems(
+                                  outingId,
+                                  oldIndex,
+                                  newIndex > oldIndex ? newIndex + 1 : newIndex,
+                                ),
+                              );
+                            },
                             itemBuilder: (context, index) {
                               final item = outing.items[index];
                               return Padding(
@@ -200,13 +204,13 @@ class _PackScreenState extends State<PackScreen> {
                                   label: item.label,
                                   icon: item.iconKey,
                                   checked: item.checked,
-                                  onToggle: complete || _finishPending
-                                      ? () {}
-                                      : () => _toggle(item),
-                                  onMore: complete
+                                  onToggle: canEdit
+                                      ? () => _toggle(item)
+                                      : () {},
+                                  onMore: !canEdit
                                       ? null
                                       : () => _itemActions(context, item),
-                                  trailing: complete
+                                  trailing: !canEdit
                                       ? null
                                       : ReorderableDragStartListener(
                                           index: index,
@@ -223,7 +227,7 @@ class _PackScreenState extends State<PackScreen> {
                               );
                             },
                           ),
-                        if (!complete && outing.items.isNotEmpty) ...[
+                        if (canEdit && outing.items.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           OutlinedButton.icon(
                             onPressed: () => _addItem(context),
@@ -288,10 +292,38 @@ class _PackScreenState extends State<PackScreen> {
               ),
             ),
             child: complete
-                ? PrimaryButton(
-                    label: 'Reopen this outing',
-                    icon: Icons.replay_rounded,
-                    onPressed: () => _reopen(context),
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      PrimaryButton(
+                        label: 'Back to home',
+                        icon: Icons.home_outlined,
+                        onPressed: _backToHome,
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: OutlinedButton.icon(
+                          onPressed: _reopenPending || _finishPending
+                              ? null
+                              : _reopen,
+                          icon: _reopenPending
+                              ? const Icon(Icons.sync_rounded, size: 18)
+                              : const Icon(Icons.replay_rounded, size: 18),
+                          label: Text(
+                            _reopenPending ? 'Reopening…' : 'Reopen outing',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: context.appColors.ink,
+                            side: BorderSide(color: context.appColors.line),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   )
                 : Column(
                     mainAxisSize: MainAxisSize.min,
@@ -324,6 +356,7 @@ class _PackScreenState extends State<PackScreen> {
   );
 
   Future<void> _toggle(OutingItem item) async {
+    if (_finishPending || _reopenPending) return;
     if (controller.state.settings.haptics) {
       unawaited(HapticFeedback.selectionClick());
     }
@@ -349,7 +382,7 @@ class _PackScreenState extends State<PackScreen> {
               children: [
                 ListTile(
                   leading: IconTile(
-                    icon: iconFor(item.iconKey),
+                    iconKey: item.iconKey,
                     color: context.appColors.sky,
                     size: 45,
                   ),
@@ -390,7 +423,7 @@ class _PackScreenState extends State<PackScreen> {
       );
 
   Future<void> _finish() async {
-    if (_finishPending) return;
+    if (_finishPending || _reopenPending) return;
     final currentOuting = controller.state.outings
         .where((outing) => outing.id == outingId)
         .firstOrNull;
@@ -435,11 +468,39 @@ class _PackScreenState extends State<PackScreen> {
     }
   }
 
-  Future<void> _reopen(BuildContext context) async {
+  void _backToHome() {
+    final callback = widget.onBackToHome;
+    if (callback != null) {
+      callback();
+    } else {
+      Navigator.maybePop(context);
+    }
+  }
+
+  Future<void> _reopen() async {
+    if (_reopenPending || _finishPending) return;
+    final currentOuting = controller.state.outings
+        .where((outing) => outing.id == outingId)
+        .firstOrNull;
+    if (currentOuting == null || !currentOuting.isComplete) return;
+    setState(() => _reopenPending = true);
     try {
       await controller.undoFinish(outingId);
+      final reopened = controller.state.outings
+          .where((outing) => outing.id == outingId)
+          .firstOrNull;
+      if (reopened == null || !reopened.isActive) {
+        throw StateError('This outing is still being saved.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _reopenPending = false;
+        _finishAttempted = false;
+        _finishAccepted = false;
+      });
     } catch (_) {
-      if (context.mounted) {
+      if (mounted) {
+        setState(() => _reopenPending = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Couldn’t reopen this outing. Please try again.'),

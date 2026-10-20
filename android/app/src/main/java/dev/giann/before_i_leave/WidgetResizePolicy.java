@@ -41,13 +41,32 @@ public final class WidgetResizePolicy {
         return (int) Math.floor(pixels / density);
     }
 
+    /** Small allocations omit the brand header; larger allocations keep the existing layouts. */
+    public static boolean usesTwoByTwoLayout(int widthDp, int heightDp) {
+        return (widthDp < 220 && heightDp < 260) || heightDp < 156;
+    }
+
+    public static int twoByTwoChecklistFooterHeightDp(float fontScale) {
+        // Two independently ellipsized 12/11sp lines, plus 4dp vertical padding.
+        return Math.max(48, scaled(28, safeScale(fontScale)) + 4);
+    }
+
+    public static int twoByTwoQuickFooterHeightDp(float fontScale) {
+        return Math.max(48, scaled(16, safeScale(fontScale)) + 4);
+    }
+
     public static boolean checklistUsesCompactLayout(int widthDp, int heightDp, float fontScale) {
+        if (usesTwoByTwoLayout(widthDp, heightDp)) return true;
         int fullRows = rowsThatFit(heightDp, checklistBaseHeightDp(widthDp, fontScale), checklistRowPitchDp(fontScale), MAX_CHECKLIST_ROWS);
         int compactRows = rowsThatFit(heightDp, checklistCompactRowsBaseHeightDp(fontScale), checklistRowPitchDp(fontScale), MAX_CHECKLIST_ROWS);
         return widthDp < 260 || fullRows == 0 || compactRows > fullRows;
     }
 
     public static int checklistRows(int widthDp, int heightDp, float fontScale) {
+        if (usesTwoByTwoLayout(widthDp, heightDp)) {
+            return rowsThatFit(heightDp, 5 + twoByTwoChecklistFooterHeightDp(fontScale),
+                    checklistRowPitchDp(fontScale), MAX_CHECKLIST_ROWS);
+        }
         int pitch = checklistRowPitchDp(fontScale);
         int fullRows = rowsThatFit(heightDp, checklistBaseHeightDp(widthDp, fontScale), pitch, MAX_CHECKLIST_ROWS);
         int compactRows = rowsThatFit(heightDp, checklistCompactRowsBaseHeightDp(fontScale), pitch, MAX_CHECKLIST_ROWS);
@@ -55,6 +74,14 @@ public final class WidgetResizePolicy {
     }
 
     public static int checklistRequiredHeight(int widthDp, int visibleRows, float fontScale, boolean compact) {
+        return checklistRequiredHeight(widthDp, Integer.MAX_VALUE, visibleRows, fontScale, compact);
+    }
+
+    public static int checklistRequiredHeight(int widthDp, int heightDp, int visibleRows, float fontScale, boolean compact) {
+        if (usesTwoByTwoLayout(widthDp, heightDp)) {
+            return 5 + twoByTwoChecklistFooterHeightDp(fontScale)
+                    + checklistRowPitchDp(fontScale) * Math.max(0, Math.min(MAX_CHECKLIST_ROWS, visibleRows));
+        }
         int rows = Math.max(0, Math.min(MAX_CHECKLIST_ROWS, visibleRows));
         int base = rows == 0 ? checklistCompactSummaryHeightDp(fontScale)
                 : compact ? checklistCompactRowsBaseHeightDp(fontScale) : checklistBaseHeightDp(widthDp, fontScale);
@@ -62,12 +89,17 @@ public final class WidgetResizePolicy {
     }
 
     public static boolean quickListsUsesCompactLayout(int widthDp, int heightDp, float fontScale) {
+        if (usesTwoByTwoLayout(widthDp, heightDp)) return true;
         int fullRows = rowsThatFit(heightDp, quickListBaseHeightDp(widthDp, fontScale), quickListRowPitchDp(fontScale), MAX_QUICK_LIST_ROWS);
         int compactRows = rowsThatFit(heightDp, quickListCompactBaseHeightDp(fontScale), quickListRowPitchDp(fontScale), MAX_QUICK_LIST_ROWS);
         return widthDp < 260 || fullRows == 0 || compactRows > fullRows;
     }
 
     public static int quickListRows(int widthDp, int heightDp, float fontScale) {
+        if (usesTwoByTwoLayout(widthDp, heightDp)) {
+            return rowsThatFit(heightDp, 5 + twoByTwoQuickFooterHeightDp(fontScale),
+                    quickListRowPitchDp(fontScale), MAX_QUICK_LIST_ROWS);
+        }
         int pitch = quickListRowPitchDp(fontScale);
         int fullRows = rowsThatFit(heightDp, quickListBaseHeightDp(widthDp, fontScale), pitch, MAX_QUICK_LIST_ROWS);
         int compactRows = rowsThatFit(heightDp, quickListCompactBaseHeightDp(fontScale), pitch, MAX_QUICK_LIST_ROWS);
@@ -75,6 +107,14 @@ public final class WidgetResizePolicy {
     }
 
     public static int quickListsRequiredHeight(int widthDp, int visibleRows, float fontScale, boolean compact) {
+        return quickListsRequiredHeight(widthDp, Integer.MAX_VALUE, visibleRows, fontScale, compact);
+    }
+
+    public static int quickListsRequiredHeight(int widthDp, int heightDp, int visibleRows, float fontScale, boolean compact) {
+        if (usesTwoByTwoLayout(widthDp, heightDp)) {
+            return 5 + twoByTwoQuickFooterHeightDp(fontScale)
+                    + quickListRowPitchDp(fontScale) * Math.max(0, Math.min(MAX_QUICK_LIST_ROWS, visibleRows));
+        }
         return (compact ? quickListCompactBaseHeightDp(fontScale) : quickListBaseHeightDp(widthDp, fontScale))
                 + quickListRowPitchDp(fontScale) * Math.max(0, Math.min(MAX_QUICK_LIST_ROWS, visibleRows));
     }

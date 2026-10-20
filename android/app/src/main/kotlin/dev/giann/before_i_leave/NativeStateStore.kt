@@ -25,12 +25,16 @@ internal object NativeStateStore {
     private const val TAG = "BeforeILeaveState"
     private val lock = Any()
 
-    fun readState(context: Context): String? = synchronized(lock) {
+    fun readState(context: Context, now: Long = System.currentTimeMillis()): String? = synchronized(lock) {
         val value = readRecovering(context.filesDir, STATE_FILE, STATE_BACKUP, ::isValidStateJson) ?: return@synchronized null
         val root = parseObject(value)
         if (!root.has(META_EPOCH) || !root.has(META_REVISION)) {
             root.put(META_EPOCH, LEGACY_EPOCH)
             root.put(META_REVISION, 0)
+        }
+        if (ChecklistScheduleState.ensureOccurrences(root, now)) {
+            return@synchronized commitCanonical(context, canonicalize(root,
+                root.optString(META_EPOCH, LEGACY_EPOCH), root.optLong(META_REVISION, 0L) + 1L))
         }
         root.put("_widgetSummary", deriveSummary(root))
         root.toString()
@@ -57,14 +61,46 @@ internal object NativeStateStore {
         if (current != null && baseEpoch != currentEpoch) {
             throw JSONException("Saved state was reset or replaced; reload before saving this older snapshot.")
         }
+        // Native reminder actions and daily materialization must survive a
+        // Flutter snapshot captured before those occurrences existed.
+        val targetOutings = target.getJSONArray("outings")
+        val baseOutings = ChecklistScheduleState.objects(base?.optJSONArray("outings")).associateBy { it.optString("id") }
+        val currentOutings = ChecklistScheduleState.objects(current?.optJSONArray("outings")).associateBy { it.optString("id") }
+        // The first committed daily snapshot wins concurrent creation. A later
+        // unchanged queued snapshot also keeps the saved structure; explicit
+        // structural edits to an occurrence already in the base remain valid.
+        for (index in 0 until targetOutings.length()) {
+            val id = targetOutings.getJSONObject(index).optString("id")
+            val saved = currentOutings[id]
+            val previous = baseOutings[id]
+            if (saved != null && !saved.isNull("scheduleId") &&
+                (previous == null || sameOutingSnapshot(previous, targetOutings.getJSONObject(index)))) {
+                targetOutings.put(index, copyObject(saved))
+            }
+        }
+        val targetIds = ChecklistScheduleState.objects(targetOutings).map { it.optString("id") }.toSet()
+        ChecklistScheduleState.objects(current?.optJSONArray("outings"))
+            .filter { !it.isNull("scheduleId") && it.optString("id") !in targetIds }
+            .forEach { targetOutings.put(copyObject(it)) }
+        current?.optJSONObject("_scheduleReminderState")?.let { target.put("_scheduleReminderState", copyObject(it)) }
         val intents = parseCheckIntents(checkIntents)
         val lifecycle = parseLifecycleIntents(lifecycleIntents)
         val epoch = currentEpoch.takeUnless { current == null } ?: UUID.randomUUID().toString()
         val previousRevision = current?.optLong(META_REVISION, 0L)?.coerceAtLeast(0L) ?: 0L
         val emptyState = JSONObject().put("outings", org.json.JSONArray())
         val rejected = mergeExistingState(target, current ?: emptyState, intents, lifecycle, previousRevision + 1L)
+        ChecklistScheduleState.ensureOccurrences(target, System.currentTimeMillis())
         val candidate = canonicalize(target, epoch, previousRevision + 1L)
         addResponseRejections(commitCanonical(context, candidate), rejected)
+    }
+
+    /** Durably records delivery/skip/snooze under the same state lock as checks. */
+    fun updateScheduleState(context: Context, change: (JSONObject) -> Boolean): String? = synchronized(lock) {
+        val root = readState(context)?.let(::parseObject) ?: return@synchronized null
+        if (!change(root)) return@synchronized root.toString()
+        validateStateJson(root.toString())
+        commitCanonical(context, canonicalize(root, root.optString(META_EPOCH, LEGACY_EPOCH),
+            root.optLong(META_REVISION, 0L) + 1L))
     }
 
     fun resetState(context: Context, targetJson: String): String = synchronized(lock) {
@@ -274,6 +310,16 @@ internal object NativeStateStore {
         return result
     }
 
+    /** Checks/lifecycle have separate intent masks; only structure is compared. */
+    private fun sameOutingSnapshot(left: JSONObject, right: JSONObject): Boolean {
+        val fields = listOf("id", "scheduleId", "blueprintId", "blueprintName", "date", "startedAt")
+        if (fields.any { left.optString(it) != right.optString(it) }) return false
+        fun items(value: JSONObject) = ChecklistScheduleState.objects(value.optJSONArray("items")).map {
+            listOf(it.optString("id"), it.optString("label"), it.optString("iconKey"))
+        }
+        return items(left) == items(right)
+    }
+
     private fun mergeExistingState(
         target: JSONObject,
         current: JSONObject,
@@ -418,7 +464,9 @@ internal object NativeStateStore {
 
     private fun deriveSummary(root: JSONObject): JSONObject {
         val outings = root.optJSONArray("outings") ?: return emptySummary()
+        val today = ChecklistScheduleState.dateKey(java.util.Calendar.getInstance(java.util.TimeZone.getDefault(), java.util.Locale.US))
         val all = (0 until outings.length()).mapNotNull(outings::optJSONObject)
+            .filter { it.isNull("scheduleId") || it.optString("date") == today }
         val active = all.filter(::isActiveOuting).maxByOrNull { it.optString("startedAt") }
         val summaryOuting = active ?: all.filterNot(::isDismissedOuting).maxByOrNull { it.optString("startedAt") }
             ?: return emptySummary()
@@ -527,6 +575,7 @@ internal object NativeStateStore {
     private fun isValidStateJson(value: String): Boolean {
         return try {
         val json = parseObject(value)
+        if (!ChecklistScheduleState.valid(json)) return false
         val rawSettings = json.opt("settings")
         if (json.opt("version") !is Number || json.optInt("version", -1) != 1) return false
         if (rawSettings != null && rawSettings != JSONObject.NULL && rawSettings !is JSONObject) return false

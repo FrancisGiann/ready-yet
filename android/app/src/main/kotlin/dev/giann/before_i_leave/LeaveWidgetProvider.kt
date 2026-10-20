@@ -6,8 +6,10 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.SizeF
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -103,10 +105,9 @@ internal object WidgetRenderService {
     }
 
     private fun renderChecklist(context: Context, manager: AppWidgetManager, widgetId: Int, state: JSONObject?, projection: ChecklistWidgetProjection) {
-        val sizes = widgetSizes(context, manager, widgetId)
-        val landscape = checklistViews(context, widgetId, state, projection, sizes.landscape)
-        val portrait = checklistViews(context, widgetId, state, projection, sizes.portrait)
-        manager.updateAppWidget(widgetId, RemoteViews(landscape, portrait))
+        updateSizedViews(context, manager, widgetId) { size ->
+            checklistViews(context, widgetId, state, projection, size)
+        }
     }
 
     private fun checklistViews(
@@ -119,9 +120,14 @@ internal object WidgetRenderService {
         val epoch = state?.optString("_storageEpoch", "legacy-v1") ?: "legacy-v1"
         val revision = state?.optLong("_nativeRevision", 0L) ?: 0L
         val generation = WidgetInstanceConfigStore.bindingGeneration(context, widgetId, quickLists = false).orEmpty()
+        val tiny = WidgetResizePolicy.usesTwoByTwoLayout(size.widthDp, size.heightDp)
         val compact = WidgetResizePolicy.checklistUsesCompactLayout(size.widthDp, size.heightDp, size.fontScale)
         val maxRows = WidgetResizePolicy.checklistRows(size.widthDp, size.heightDp, size.fontScale)
-        val layout = if (compact) R.layout.before_i_leave_widget_compact else R.layout.before_i_leave_widget
+        val layout = when {
+            tiny -> R.layout.before_i_leave_widget_2x2
+            compact -> R.layout.before_i_leave_widget_compact
+            else -> R.layout.before_i_leave_widget
+        }
         val rowIds = intArrayOf(R.id.widget_item_1, R.id.widget_item_2, R.id.widget_item_3, R.id.widget_item_4, R.id.widget_item_5)
         val indicatorIds = intArrayOf(R.id.widget_item_indicator_1, R.id.widget_item_indicator_2, R.id.widget_item_indicator_3, R.id.widget_item_indicator_4, R.id.widget_item_indicator_5)
         val labelIds = intArrayOf(R.id.widget_item_label_1, R.id.widget_item_label_2, R.id.widget_item_label_3, R.id.widget_item_label_4, R.id.widget_item_label_5)
@@ -134,6 +140,7 @@ internal object WidgetRenderService {
             }
             setTextViewText(R.id.widget_title, projection.title)
             val compactProgress = when {
+                projection.stateMessage == "Completed today" || projection.stateMessage == "Skipped today" -> projection.progress
                 projection.totalCount <= 0 -> projection.progress
                 projection.outingId != null -> "${projection.checkedCount}/${projection.totalCount}"
                 else -> "${projection.totalCount} ready"
@@ -177,7 +184,26 @@ internal object WidgetRenderService {
                 compact && maxRows == 0 -> "Open ${projection.title}"
                 else -> "Open full checklist"
             }
-            setTextViewText(R.id.widget_action, if (overflow > 0 && maxRows > 0) "$action · +$overflow more" else action)
+            val actionTarget = if (tiny) R.id.widget_action_container else R.id.widget_action
+            if (tiny) {
+                setInt(actionTarget, "setMinimumHeight", dp(context, WidgetResizePolicy.twoByTwoChecklistFooterHeightDp(size.fontScale)))
+                setTextViewText(R.id.widget_action, when {
+                    configure -> "Choose a list"
+                    !projection.canOpenList -> "Open Ready Yet?"
+                    else -> "Open ${projection.title}"
+                })
+                val status = when {
+                    projection.stateMessage == "Completed today" || projection.stateMessage == "Skipped today" -> projection.progress
+                    configure -> "Ready Yet?"
+                    projection.totalCount == 0 -> "Add items in app"
+                    projection.outingId != null -> "$compactProgress packed"
+                    else -> "$compactProgress to pack"
+                }
+                setTextViewText(R.id.widget_small_progress, if (overflow > 0 && shownItems > 0) "$status · +$overflow" else status)
+                setViewVisibility(R.id.widget_title_row, View.GONE)
+            } else {
+                setTextViewText(R.id.widget_action, if (overflow > 0 && maxRows > 0) "$action · +$overflow more" else action)
+            }
             val destination = if (configure) WidgetIntentContract.configuration(context, widgetId, quickLists = false)
                 else WidgetIntentContract.openDestination(context, widgetId, projection.blueprintId, projection.outingId)
             val openDescription = when {
@@ -185,18 +211,15 @@ internal object WidgetRenderService {
                 compact && maxRows == 0 -> "${projection.title}. ${projection.progress}. Open it in Ready Yet?"
                 else -> "Open ${projection.title} in Ready Yet?"
             }
-            setContentDescription(R.id.widget_action, openDescription)
+            setContentDescription(actionTarget, "${projection.title}. ${projection.progress}. $openDescription" + if (overflow > 0) ". $overflow more items in app." else "")
             setContentDescription(R.id.widget_root, openDescription)
-            setOnClickPendingIntent(R.id.widget_action, destination)
+            setOnClickPendingIntent(actionTarget, destination)
             setOnClickPendingIntent(R.id.widget_root, destination)
         }
     }
 
     private fun renderQuick(context: Context, manager: AppWidgetManager, widgetId: Int, projections: List<QuickListWidgetProjection>) {
-        val sizes = widgetSizes(context, manager, widgetId)
-        val landscape = quickViews(context, widgetId, projections, sizes.landscape)
-        val portrait = quickViews(context, widgetId, projections, sizes.portrait)
-        manager.updateAppWidget(widgetId, RemoteViews(landscape, portrait))
+        updateSizedViews(context, manager, widgetId) { size -> quickViews(context, widgetId, projections, size) }
     }
 
     private fun quickViews(
@@ -205,8 +228,13 @@ internal object WidgetRenderService {
         projections: List<QuickListWidgetProjection>,
         size: WidgetSize,
     ): RemoteViews {
+        val tiny = WidgetResizePolicy.usesTwoByTwoLayout(size.widthDp, size.heightDp)
         val compact = WidgetResizePolicy.quickListsUsesCompactLayout(size.widthDp, size.heightDp, size.fontScale)
-        val layout = if (compact) R.layout.quick_lists_widget_compact else R.layout.quick_lists_widget
+        val layout = when {
+            tiny -> R.layout.quick_lists_widget_2x2
+            compact -> R.layout.quick_lists_widget_compact
+            else -> R.layout.quick_lists_widget
+        }
         val ids = intArrayOf(R.id.quick_list_1, R.id.quick_list_2, R.id.quick_list_3, R.id.quick_list_4)
         val titleIds = intArrayOf(R.id.quick_list_title_1, R.id.quick_list_title_2, R.id.quick_list_title_3, R.id.quick_list_title_4)
         val statusIds = intArrayOf(R.id.quick_list_status_1, R.id.quick_list_status_2, R.id.quick_list_status_3, R.id.quick_list_status_4)
@@ -217,7 +245,7 @@ internal object WidgetRenderService {
             if (compact) {
                 setViewVisibility(R.id.quick_widget_tagline, View.GONE)
                 setViewVisibility(R.id.quick_list_rows, if (rowBudget > 0) View.VISIBLE else View.GONE)
-                if (size.fontScale >= 2.5f) {
+                if (!tiny && size.fontScale >= 2.5f) {
                     setViewPadding(R.id.quick_widget_root, dp(context, 8), dp(context, 2), dp(context, 8), dp(context, 2))
                     setTextViewTextSize(R.id.quick_widget_title, TypedValue.COMPLEX_UNIT_SP, 9f)
                 }
@@ -229,6 +257,8 @@ internal object WidgetRenderService {
                     setViewVisibility(rowId, View.VISIBLE)
                     setTextViewText(titleIds[index], list.title)
                     val compactStatus = when {
+                        list.stateMessage == "Completed today" || list.stateMessage == "Skipped today" -> list.progress
+                        tiny && list.hasActive && list.totalCount > 0 -> "${list.checkedCount}/${list.totalCount} packed"
                         list.hasActive && list.totalCount > 0 -> "${list.checkedCount} packed"
                         list.totalCount > 0 -> "${list.totalCount} ready"
                         else -> "Add items"
@@ -237,12 +267,15 @@ internal object WidgetRenderService {
                     val total = list.totalCount.coerceAtLeast(0)
                     val checked = list.checkedCount.coerceIn(0, total)
                     val badge = when {
+                        list.stateMessage == "Completed today" -> "DONE"
+                        list.stateMessage == "Skipped today" -> "SKIP"
                         list.hasActive && total > 0 -> "$checked/$total"
                         total > 0 -> "READY"
                         else -> "EMPTY"
                     }
                     setTextViewText(badgeIds[index], badge)
                     val accessibleProgress = when {
+                        list.stateMessage == "Completed today" || list.stateMessage == "Skipped today" -> list.progress
                         list.hasActive && total > 0 -> "$checked of $total packed"
                         total > 0 -> "$total items ready to pack"
                         else -> "List is empty"
@@ -258,9 +291,16 @@ internal object WidgetRenderService {
             setViewVisibility(R.id.quick_widget_action, View.VISIBLE)
             setOnClickPendingIntent(R.id.quick_widget_action, WidgetIntentContract.configuration(context, widgetId, quickLists = true))
             val overflow = (projections.size - visibleLists.size).coerceAtLeast(0)
-            val action = if (overflow > 0 && rowBudget > 0) "Manage quick lists · +$overflow more" else "Manage quick lists"
+            val action = when {
+                tiny && projections.isEmpty() -> "Choose lists"
+                tiny && overflow > 0 -> "Lists · +$overflow"
+                tiny -> "Manage lists"
+                overflow > 0 && rowBudget > 0 -> "Manage quick lists · +$overflow more"
+                else -> "Manage quick lists"
+            }
+            if (tiny) setInt(R.id.quick_widget_action, "setMinimumHeight", dp(context, WidgetResizePolicy.twoByTwoQuickFooterHeightDp(size.fontScale)))
             setTextViewText(R.id.quick_widget_action, action)
-            setContentDescription(R.id.quick_widget_action, action)
+            setContentDescription(R.id.quick_widget_action, "Manage quick lists. $overflow more lists available in configuration.")
             setOnClickPendingIntent(
                 R.id.quick_widget_root,
                 visibleLists.firstOrNull()?.let { WidgetIntentContract.openDestination(context, widgetId, it.blueprintId, it.outingId, quickLists = true) }
@@ -272,6 +312,24 @@ internal object WidgetRenderService {
                     ?: "Open Today in Ready Yet?",
             )
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun updateSizedViews(context: Context, manager: AppWidgetManager, widgetId: Int, render: (WidgetSize) -> RemoteViews) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val sizes = manager.getAppWidgetOptions(widgetId)
+                .getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+                .orEmpty().filter { it.width.isFinite() && it.height.isFinite() && it.width > 0 && it.height > 0 }
+                .distinct().take(16)
+            if (sizes.isNotEmpty()) {
+                manager.updateAppWidget(widgetId, RemoteViews(sizes.associateWith { size ->
+                    render(WidgetSize(size.width.toInt(), size.height.toInt(), context.resources.configuration.fontScale))
+                }))
+                return
+            }
+        }
+        val sizes = widgetSizes(context, manager, widgetId)
+        manager.updateAppWidget(widgetId, RemoteViews(render(sizes.landscape), render(sizes.portrait)))
     }
 
     private data class WidgetSize(val widthDp: Int, val heightDp: Int, val fontScale: Float)
@@ -304,28 +362,28 @@ internal object WidgetRenderService {
     private fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 
     private fun renderUnavailable(context: Context, manager: AppWidgetManager, widgetId: Int) {
-        if (manager.getAppWidgetInfo(widgetId)?.provider?.className?.endsWith("QuickListsWidgetProvider") == true) {
-            val sizes = widgetSizes(context, manager, widgetId)
-            val landscape = unavailableQuickViews(context, widgetId, sizes.landscape)
-            val portrait = unavailableQuickViews(context, widgetId, sizes.portrait)
-            manager.updateAppWidget(widgetId, RemoteViews(landscape, portrait))
-        } else {
-            val landscape = unavailableChecklistViews(context, widgetId)
-            val portrait = unavailableChecklistViews(context, widgetId)
-            manager.updateAppWidget(widgetId, RemoteViews(landscape, portrait))
+        val quick = manager.getAppWidgetInfo(widgetId)?.provider?.className?.endsWith("QuickListsWidgetProvider") == true
+        updateSizedViews(context, manager, widgetId) { size ->
+            if (quick) unavailableQuickViews(context, widgetId, size)
+            else unavailableChecklistViews(context, widgetId, size)
         }
     }
 
     private fun unavailableQuickViews(context: Context, widgetId: Int, size: WidgetSize): RemoteViews {
+        val tiny = WidgetResizePolicy.usesTwoByTwoLayout(size.widthDp, size.heightDp)
         val compact = WidgetResizePolicy.quickListsUsesCompactLayout(size.widthDp, size.heightDp, size.fontScale)
-        val layout = if (compact) R.layout.quick_lists_widget_compact else R.layout.quick_lists_widget
+        val layout = when {
+            tiny -> R.layout.quick_lists_widget_2x2
+            compact -> R.layout.quick_lists_widget_compact
+            else -> R.layout.quick_lists_widget
+        }
         val rowCount = WidgetResizePolicy.quickListRows(size.widthDp, size.heightDp, size.fontScale)
         return RemoteViews(context.packageName, layout).apply {
             setTextViewText(R.id.quick_widget_title, "Ready Yet?")
             if (compact) {
                 setViewVisibility(R.id.quick_widget_tagline, View.GONE)
                 setViewVisibility(R.id.quick_list_rows, if (rowCount > 0) View.VISIBLE else View.GONE)
-                if (size.fontScale >= 2.5f) {
+                if (!tiny && size.fontScale >= 2.5f) {
                     setViewPadding(R.id.quick_widget_root, dp(context, 8), dp(context, 2), dp(context, 8), dp(context, 2))
                     setTextViewTextSize(R.id.quick_widget_title, TypedValue.COMPLEX_UNIT_SP, 9f)
                 }
@@ -339,14 +397,17 @@ internal object WidgetRenderService {
                 setOnClickPendingIntent(R.id.quick_list_1, WidgetIntentContract.openDestination(context, widgetId, null, null, quickLists = true))
             } else setViewVisibility(R.id.quick_list_1, View.GONE)
             setViewVisibility(R.id.quick_widget_action, View.VISIBLE)
-            setTextViewText(R.id.quick_widget_action, "Open Ready Yet?")
+            setTextViewText(R.id.quick_widget_action, if (tiny) "Open app" else "Open Ready Yet?")
+            if (tiny) setInt(R.id.quick_widget_action, "setMinimumHeight", dp(context, WidgetResizePolicy.twoByTwoQuickFooterHeightDp(size.fontScale)))
             setOnClickPendingIntent(R.id.quick_widget_action, WidgetIntentContract.openDestination(context, widgetId, null, null, quickLists = true))
             setContentDescription(R.id.quick_widget_root, "Ready Yet? Saved lists are unavailable. Open the app to load them.")
         }
     }
 
-    private fun unavailableChecklistViews(context: Context, widgetId: Int): RemoteViews =
-        RemoteViews(context.packageName, R.layout.before_i_leave_widget_compact).apply {
+    private fun unavailableChecklistViews(context: Context, widgetId: Int, size: WidgetSize): RemoteViews {
+        val tiny = WidgetResizePolicy.usesTwoByTwoLayout(size.widthDp, size.heightDp)
+        val layout = if (tiny) R.layout.before_i_leave_widget_2x2 else R.layout.before_i_leave_widget_compact
+        return RemoteViews(context.packageName, layout).apply {
             setViewVisibility(R.id.widget_brand_tagline, View.GONE)
             setTextViewText(R.id.widget_title, "Ready Yet?")
             setTextViewText(R.id.widget_progress, "Open the app to load your lists")
@@ -355,7 +416,14 @@ internal object WidgetRenderService {
             setViewVisibility(R.id.widget_item_rows, View.GONE)
             setTextViewText(R.id.widget_action, "Open Ready Yet?")
             setOnClickPendingIntent(R.id.widget_root, WidgetIntentContract.openDestination(context, widgetId, null, null, quickLists = true))
-            setOnClickPendingIntent(R.id.widget_action, WidgetIntentContract.openDestination(context, widgetId, null, null, quickLists = true))
+            val target = if (tiny) R.id.widget_action_container else R.id.widget_action
+            if (tiny) {
+                setInt(target, "setMinimumHeight", dp(context, WidgetResizePolicy.twoByTwoChecklistFooterHeightDp(size.fontScale)))
+                setTextViewText(R.id.widget_small_progress, "Load saved lists")
+            }
+            setOnClickPendingIntent(target, WidgetIntentContract.openDestination(context, widgetId, null, null, quickLists = true))
+            setContentDescription(target, "Open Ready Yet? to load saved lists.")
             setContentDescription(R.id.widget_root, "Ready Yet? Saved lists are unavailable. Open the app to load them.")
         }
+    }
 }

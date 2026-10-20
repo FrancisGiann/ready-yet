@@ -28,10 +28,12 @@ internal class ReminderRescheduleReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
-            Intent.ACTION_DATE_CHANGED -> ReminderScheduler.rescheduleIfEnabled(
-                context,
-                force = ReminderReschedulePolicy.shouldForceForAction(intent.action),
-            )
+            Intent.ACTION_DATE_CHANGED,
+            "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" -> {
+                ReminderScheduler.rescheduleIfEnabled(context,
+                    force = ReminderReschedulePolicy.shouldForceForAction(intent.action))
+                ChecklistScheduleScheduler.enqueue(context, goAsync())
+            }
         }
     }
 }

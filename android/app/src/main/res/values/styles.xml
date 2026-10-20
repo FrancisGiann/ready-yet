@@ -194,4 +194,51 @@
         <item name="android:statusBarColor">@color/widget_config_surface</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+    <!-- The 2×2 branch keeps full 48dp targets and puts context in its footer. -->
+    <style name="WidgetTwoByTwoChecklistRow" parent="WidgetChecklistRow">
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingEnd">4dp</item>
+    </style>
+    <style name="WidgetTwoByTwoChecklistIndicator" parent="WidgetChecklistIndicator">
+        <item name="android:layout_width">18dp</item>
+        <item name="android:layout_height">18dp</item>
+        <item name="android:layout_marginEnd">6dp</item>
+    </style>
+    <style name="WidgetTwoByTwoFooter">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">6dp</item>
+        <item name="android:paddingEnd">6dp</item>
+        <item name="android:paddingTop">2dp</item>
+        <item name="android:paddingBottom">2dp</item>
+        <item name="android:background">@drawable/widget_footer_button</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+    <style name="WidgetTwoByTwoActionTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/widget_action_ink</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:importantForAccessibility">no</item>
+    </style>
+    <style name="WidgetTwoByTwoActionStatus" parent="WidgetTwoByTwoActionTitle">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+    <style name="WidgetTwoByTwoQuickListItem" parent="WidgetCompactQuickListItem">
+        <item name="android:paddingStart">6dp</item>
+        <item name="android:paddingEnd">6dp</item>
+    </style>
+    <style name="WidgetTwoByTwoQuickFooter" parent="WidgetCompactFooterAction">
+        <item name="android:paddingStart">6dp</item>
+        <item name="android:paddingEnd">6dp</item>
+    </style>
 </resources>
