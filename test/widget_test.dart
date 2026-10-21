@@ -47,7 +47,12 @@ void main() {
   );
 
   testWidgets('Ready Yet? keeps Before I Leave as its tagline', (tester) async {
-    final controller = await _controller(onboarded: false);
+    final initial = AppState.initial().copyWith(
+      settings: AppSettings(onboarded: false),
+    );
+    final gateway = FakeLeaveGateway(storedJson: jsonEncode(initial.toJson()))
+      ..currentAppVersion = const {'versionName': '9.8.7', 'buildNumber': '42'};
+    final controller = await _controller(onboarded: false, gateway: gateway);
     await tester.pumpWidget(BeforeILeaveApp(controller: controller));
     await tester.pumpAndSettle();
 
@@ -69,16 +74,56 @@ void main() {
         )
         .first;
     await tester.scrollUntilVisible(
-      find.text('READY YET?  ·  1.0.3'),
+      find.text('READY YET?  ·  9.8.7+42'),
       320,
       scrollable: settingsScrollable,
     );
-    expect(find.text('READY YET?  ·  1.0.3'), findsOneWidget);
+    expect(find.text('READY YET?  ·  9.8.7+42'), findsOneWidget);
     expect(find.text('Before I Leave'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     controller.dispose();
+  });
+
+  testWidgets('About stays brand-only for missing or failed metadata', (
+    tester,
+  ) async {
+    Future<void> check({required bool failAppVersion}) async {
+      final initial = AppState.initial().copyWith(
+        settings: AppSettings(onboarded: false),
+      );
+      final gateway = FakeLeaveGateway(storedJson: jsonEncode(initial.toJson()))
+        ..failAppVersion = failAppVersion;
+      final controller = await _controller(onboarded: false, gateway: gateway);
+      await tester.pumpWidget(BeforeILeaveApp(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+      gateway.writes.clear();
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+      final scrollable = find
+          .descendant(
+            of: find.byKey(const PageStorageKey<String>('settings')),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(
+        find.text('READY YET?'),
+        320,
+        scrollable: scrollable,
+      );
+      expect(find.text('READY YET?'), findsOneWidget);
+      expect(find.textContaining('READY YET?  · '), findsNothing);
+      expect(gateway.writes, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      controller.dispose();
+    }
+
+    await check(failAppVersion: false);
+    await check(failAppVersion: true);
   });
 
   testWidgets(
@@ -1793,7 +1838,7 @@ void main() {
           )
           .first;
       await tester.scrollUntilVisible(
-        find.text('READY YET?  ·  1.0.3'),
+        find.text('READY YET?'),
         220,
         scrollable: settingsScrollable,
       );

@@ -8,10 +8,10 @@ Schedule wake, date/timezone changes and boot rescheduling refresh all widget ki
 
 ## Validation
 
-- 94 Flutter tests passed, including seven scheduled-widget launch cases; Flutter analysis found no issues.
+- The initial scheduled-widget candidate passed all 94 Flutter tests. The final About metadata correction passed 12 focused Flutter checks: four channel/controller/branding/fallback cases, seven scheduled-widget launch regressions and one actual-package-metadata render case covering light/dark. Flutter analysis found no issues. The full suite was not rerun after this minimal read-only metadata correction.
 - 227 focused Java widget-policy assertions passed, including 19 new selection/freshness assertions.
 - Release APK compiled; release lint reported zero errors and 94 warnings.
-- Six Robolectric API 35 tests used production release-compiled classes and packaged APK resources. Coverage includes actual private-receiver PendingIntent delivery, desired-value replay, stale epoch/binding/day rejection, exact open/reopen, installed provider refresh, timezone broadcast refresh, captured-day/DST selection and retained history.
+- Seven Robolectric API 35 tests used production release-compiled classes and packaged APK resources. Coverage includes actual private-receiver PendingIntent delivery, desired-value replay, stale epoch/binding/day rejection, exact open/reopen, installed provider refresh, timezone broadcast refresh, captured-day/DST selection, retained history and the production About helper reading actual installed APK package metadata.
 - Fourteen native RemoteViews captures cover empty/no-today/no-schedules/completed/skipped/multiple schedules, long titles, light/dark configurations, 110/130/156dp compact layouts, larger/wide resizing and font scales 1/1.5/2/3. Visible row/footer targets remain at least 48dp and footers fit their bounds. The due line fits unellipsized at the standard 156dp compact size.
 - APK signature and 16KiB alignment verified. Package `dev.giann.before_i_leave`, version name `1.0.6`, version code `7`, ARM64, Android API24+. Signing certificate SHA-256: `b33178ae6305c6776f3971fda246c7f4738200830e5ad1d1709983b3c855ab63`, matching previous releases.
 
@@ -19,7 +19,7 @@ Physical install/upgrade, OEM launcher/picker/pin, TalkBack, real reboot/Doze an
 
 ## Published binary provenance
 
-The existing verified signed candidate is reused without rebuilding or re-signing. It was built with version flags 1.0.6+7; source pubspec metadata now declares the same values. App implementation files match that candidate. The inherited About-screen display string remains 1.0.3 in both source and binary; Android installation metadata is 1.0.6+7. Updating that display text would require a separately tested rebuild.
+The final APK was rebuilt serially after replacing the inherited hardcoded About display with a read-only PackageManager version/build metadata path. It displays 1.0.6+7, with a brand-only fallback when metadata is unavailable. Source pubspec and native APK metadata both declare 1.0.6+7. Existing signing, package, schedules, history and storage are preserved. Host native metadata extraction and Flutter renders verified the displayed version; a physical-device install was not performed.
 
 APK: `Ready-Yet-1.0.6-arm64-v8a.apk`, 18,918,726 bytes.
-SHA-256: `f37ab17e8643b1f02adab7275e8a8d98563abd8b1091da2ff17d4a060fd44ccd`.
+SHA-256: `32d6ff203192a8c97cf58567538411b56af7d01ec377ddc5a07b66633cbac929`.

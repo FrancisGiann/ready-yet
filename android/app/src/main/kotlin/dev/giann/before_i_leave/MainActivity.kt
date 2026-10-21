@@ -28,6 +28,9 @@ class MainActivity : FlutterActivity() {
             channel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "readState" -> readStateAsync(result)
+                    "appVersion" -> runCatching { installedAppVersion() }.fold(result::success) {
+                        result.error("app_version_unavailable", it.message, null)
+                    }
                     "writeState" -> writeStateAsync(call.arguments, result, reset = false)
                     "resetState" -> writeStateAsync(call.arguments, result, reset = true)
                     "widgetSnapshot" -> {
@@ -192,6 +195,20 @@ class MainActivity : FlutterActivity() {
         val manager = AppWidgetManager.getInstance(this)
         if (!manager.isRequestPinAppWidgetSupported) return false
         return runCatching { manager.requestPinAppWidget(ComponentName(this, provider), Bundle(), null) }.getOrDefault(false)
+    }
+
+    private fun installedAppVersion(): Map<String, String> {
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        @Suppress("DEPRECATION")
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            packageInfo.versionCode.toLong()
+        }
+        return mapOf(
+            "versionName" to packageInfo.versionName.orEmpty(),
+            "buildNumber" to versionCode.toString(),
+        )
     }
 
     private fun requestNotificationPermission(result: MethodChannel.Result) {

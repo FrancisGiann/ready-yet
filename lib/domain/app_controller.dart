@@ -1290,6 +1290,8 @@ class AppController extends ChangeNotifier {
     return _queueSnapshot();
   }
 
+  Future<Map<String, Object?>> appVersion() => _gateway.appVersion();
+
   Future<Map<String, Object?>> reminderStatus() => _gateway.reminderStatus();
 
   Future<bool> requestNotifications() => _gateway.requestNotifications();

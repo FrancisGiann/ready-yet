@@ -20,6 +20,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen>
     with WidgetsBindingObserver {
   Map<String, Object?> _reminderStatus = const {};
+  Map<String, Object?> _appVersion = const {};
   bool _checkingReminder = false;
 
   @override
@@ -27,6 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _syncReminderStatus();
+    _readAppVersion();
   }
 
   @override
@@ -64,6 +66,25 @@ class _SettingsScreenState extends State<SettingsScreen>
         setState(() => _reminderStatus = const {'status': 'unavailable'});
       }
     }
+  }
+
+  Future<void> _readAppVersion() async {
+    try {
+      final value = await widget.controller.appVersion();
+      if (mounted) setState(() => _appVersion = value);
+    } catch (_) {
+      if (mounted) setState(() => _appVersion = const {});
+    }
+  }
+
+  String get _aboutVersionText {
+    final versionName = _appVersion['versionName']?.toString().trim();
+    if (versionName == null || versionName.isEmpty) return 'READY YET?';
+    final buildNumber = _appVersion['buildNumber']?.toString().trim();
+    final suffix = buildNumber == null || buildNumber.isEmpty
+        ? versionName
+        : '$versionName+$buildNumber';
+    return 'READY YET?  ·  $suffix';
   }
 
   void _update(AppSettings settings) =>
@@ -413,7 +434,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   child: Column(
                     children: [
                       Text(
-                        'READY YET?  ·  1.0.3',
+                        _aboutVersionText,
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           letterSpacing: 1.1,

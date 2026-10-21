@@ -13,6 +13,8 @@ import '../domain/models.dart';
 abstract interface class LeaveGateway {
   Future<String?> readState();
 
+  Future<Map<String, Object?>> appVersion();
+
   Future<String?> getLaunchAction();
 
   void setLaunchActionHandler(void Function(String action)? handler);
@@ -82,6 +84,11 @@ class MethodChannelLeaveGateway
 
   @override
   Future<String?> readState() => _channel.invokeMethod<String?>('readState');
+
+  @override
+  Future<Map<String, Object?>> appVersion() async => _stringKeyMap(
+    await _channel.invokeMapMethod<dynamic, dynamic>('appVersion'),
+  );
 
   @override
   Future<String?> getLaunchAction() =>
@@ -236,6 +243,8 @@ class FakeLeaveGateway implements LeaveGateway {
   bool pinWidgetAccepted = true;
   Map<String, Object?> currentReminderStatus = const {};
   Map<String, Object?> currentWidgetSnapshot = const {};
+  Map<String, Object?> currentAppVersion = const {};
+  bool failAppVersion = false;
   Future<void> Function()? beforeReadReply;
   Future<void> Function()? beforeWriteCommit;
   Future<void> Function(String committedJson)? beforeWriteReply;
@@ -258,6 +267,12 @@ class FakeLeaveGateway implements LeaveGateway {
       await callback();
     }
     return value;
+  }
+
+  @override
+  Future<Map<String, Object?>> appVersion() async {
+    if (failAppVersion) throw StateError('Injected app version failure');
+    return Map.unmodifiable(currentAppVersion);
   }
 
   @override

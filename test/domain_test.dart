@@ -8,6 +8,37 @@ import 'package:before_i_leave/domain/models.dart';
 import 'package:before_i_leave/platform/leave_gateway.dart';
 
 void main() {
+  testWidgets('MethodChannel appVersion maps installed package metadata', (
+    tester,
+  ) async {
+    const channel = MethodChannel(MethodChannelLeaveGateway.channelName);
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      if (call.method != 'appVersion') {
+        throw StateError('Unexpected native call ${call.method}');
+      }
+      return const <String, Object?>{
+        'versionName': '9.8.7',
+        'buildNumber': '42',
+      };
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final metadata = await MethodChannelLeaveGateway(channel: channel)
+        .appVersion();
+
+    expect(calls.map((call) => call.method), ['appVersion']);
+    expect(metadata, {'versionName': '9.8.7', 'buildNumber': '42'});
+  });
+
   testWidgets('MethodChannel writes carry epoch-bound transaction arguments', (
     tester,
   ) async {
@@ -108,6 +139,20 @@ void main() {
     });
 
     tearDown(() => controller.dispose());
+
+    test('appVersion forwards metadata without writing saved state', () async {
+      gateway.currentAppVersion = const {
+        'versionName': '9.8.7',
+        'buildNumber': '42',
+      };
+      gateway.writes.clear();
+
+      expect(await controller.appVersion(), {
+        'versionName': '9.8.7',
+        'buildNumber': '42',
+      });
+      expect(gateway.writes, isEmpty);
+    });
 
     test('rapid repeated toggles serialize the latest state', () async {
       final outingId = await controller.startOuting('school');
