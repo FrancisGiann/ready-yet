@@ -11,6 +11,7 @@ import '../ui/lists_screen.dart';
 import '../ui/onboarding_screen.dart';
 import '../ui/pack_screen.dart';
 import '../ui/settings_screen.dart';
+import '../ui/schedules_screen.dart';
 import '../ui/today_screen.dart';
 import '../ui/components.dart';
 import 'theme.dart';
@@ -198,6 +199,16 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     } on FormatException {
       // Invalid or legacy action payloads are handled by the controller as a
       // graceful Today fallback rather than treated as a resumable outing.
+    }
+    if (action == 'widget_schedules' ||
+        payload?['type'] == 'widget_schedules') {
+      if (payload?['requestId'] is String) {
+        if (_handledLaunchRequests.contains(requestKey)) return;
+        _rememberLaunchRequest(requestKey);
+      }
+      _returnToToday();
+      openSchedules(context, widget.controller);
+      return;
     }
     if (_handledLaunchRequests.contains(requestKey)) return;
     if (action == 'widget_today' || payload?['type'] == 'widget_today') {

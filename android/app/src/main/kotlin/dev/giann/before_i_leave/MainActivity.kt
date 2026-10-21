@@ -98,6 +98,7 @@ class MainActivity : FlutterActivity() {
         ChecklistScheduleScheduler.enqueue(this)
         LeaveWidgetProvider.refreshAll(this)
         QuickListsWidgetProvider.refreshAll(this)
+        ScheduledChecklistWidgetProvider.refreshAll(this)
     }
 
     override fun onDestroy() {
@@ -134,6 +135,9 @@ class MainActivity : FlutterActivity() {
         storageExecutor.execute {
             val state = runCatching { NativeStateStore.readState(this) }
             ChecklistScheduleScheduler.refresh(this)
+            runCatching { LeaveWidgetProvider.refreshAll(this) }
+            runCatching { QuickListsWidgetProvider.refreshAll(this) }
+            runCatching { ScheduledChecklistWidgetProvider.refreshAll(this) }
             mainHandler.post {
                 state.fold(
                     result::success,
@@ -169,6 +173,7 @@ class MainActivity : FlutterActivity() {
                         // must never turn a successful state transaction into an app error.
                         runCatching { LeaveWidgetProvider.refreshAll(this) }
                         runCatching { QuickListsWidgetProvider.refreshAll(this) }
+                        runCatching { ScheduledChecklistWidgetProvider.refreshAll(this) }
                         result.success(canonical)
                     },
                     { result.error(if (reset) "state_reset_failed" else "state_write_failed", it.message, null) },
@@ -179,7 +184,11 @@ class MainActivity : FlutterActivity() {
 
     private fun requestPinWidget(kind: String?): Boolean {
         if (Build.VERSION.SDK_INT < 26) return false
-        val provider = if (kind == "quick_lists") QuickListsWidgetProvider::class.java else LeaveWidgetProvider::class.java
+        val provider = when (kind) {
+            "quick_lists" -> QuickListsWidgetProvider::class.java
+            "scheduled" -> ScheduledChecklistWidgetProvider::class.java
+            else -> LeaveWidgetProvider::class.java
+        }
         val manager = AppWidgetManager.getInstance(this)
         if (!manager.isRequestPinAppWidgetSupported) return false
         return runCatching { manager.requestPinAppWidget(ComponentName(this, provider), Bundle(), null) }.getOrDefault(false)

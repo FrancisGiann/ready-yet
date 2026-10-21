@@ -150,6 +150,38 @@ internal object NativeStateStore {
         itemId: String,
         checked: Boolean,
         itemRenderRevision: Long,
+    ): String = applyWidgetItemCheckInternal(
+        context, widgetId, bindingGeneration, renderEpoch, renderRevision,
+        outingId, itemId, checked, itemRenderRevision, scheduleId = null,
+    )
+
+    fun applyScheduledWidgetItemCheck(
+        context: Context,
+        widgetId: Int,
+        bindingGeneration: String,
+        renderEpoch: String,
+        renderRevision: Long,
+        scheduleId: String,
+        outingId: String,
+        itemId: String,
+        checked: Boolean,
+        itemRenderRevision: Long,
+    ): String = applyWidgetItemCheckInternal(
+        context, widgetId, bindingGeneration, renderEpoch, renderRevision,
+        outingId, itemId, checked, itemRenderRevision, scheduleId,
+    )
+
+    private fun applyWidgetItemCheckInternal(
+        context: Context,
+        widgetId: Int,
+        bindingGeneration: String,
+        renderEpoch: String,
+        renderRevision: Long,
+        outingId: String,
+        itemId: String,
+        checked: Boolean,
+        itemRenderRevision: Long,
+        scheduleId: String?,
     ): String = synchronized(lock) {
         val currentJson = readRecovering(context.filesDir, STATE_FILE, STATE_BACKUP, ::isValidStateJson)
             ?: throw JSONException("There is no saved outing to update.")
@@ -159,16 +191,32 @@ internal object NativeStateStore {
         if (canonical.optString(META_EPOCH, LEGACY_EPOCH) != renderEpoch || renderRevision > currentRevision) {
             return@synchronized canonical.toString()
         }
-        val checklistIds = AppWidgetManager.getInstance(context).getAppWidgetIds(
-            ComponentName(context, LeaveWidgetProvider::class.java),
-        )
-        if (widgetId !in checklistIds) return@synchronized canonical.toString()
-        if (WidgetInstanceConfigStore.existingBindingGeneration(context, widgetId, quickLists = false) != bindingGeneration) {
-            return@synchronized canonical.toString()
+        val manager = AppWidgetManager.getInstance(context)
+        if (scheduleId != null) {
+            val scheduledIds = manager.getAppWidgetIds(ComponentName(context, ScheduledChecklistWidgetProvider::class.java))
+            if (widgetId !in scheduledIds) return@synchronized canonical.toString()
+            if (WidgetInstanceConfigStore.existingScheduledBindingGeneration(context, widgetId) != bindingGeneration) {
+                return@synchronized canonical.toString()
+            }
+            val projectionNow = System.currentTimeMillis()
+            val projectionToday = ChecklistScheduleState.dateKey(java.util.Calendar.getInstance(java.util.TimeZone.getDefault(), java.util.Locale.US).apply {
+                timeInMillis = projectionNow
+            })
+            val projection = NativeWidgetProjection.scheduledChecklist(currentJson, projectionNow)
+            if (projection.scheduleId != scheduleId || projection.checkOutingId != outingId ||
+                projection.date != projectionToday) {
+                return@synchronized canonical.toString()
+            }
+        } else {
+            val checklistIds = manager.getAppWidgetIds(ComponentName(context, LeaveWidgetProvider::class.java))
+            if (widgetId !in checklistIds) return@synchronized canonical.toString()
+            if (WidgetInstanceConfigStore.existingBindingGeneration(context, widgetId, quickLists = false) != bindingGeneration) {
+                return@synchronized canonical.toString()
+            }
+            val configuredBlueprintId = WidgetInstanceConfigStore.checklistBlueprintId(context, widgetId)
+            val projection = NativeWidgetProjection.checklists(currentJson, configuredBlueprintId)
+            if (projection.outingId != outingId) return@synchronized canonical.toString()
         }
-        val configuredBlueprintId = WidgetInstanceConfigStore.checklistBlueprintId(context, widgetId)
-        val projection = NativeWidgetProjection.checklists(currentJson, configuredBlueprintId)
-        if (projection.outingId != outingId) return@synchronized canonical.toString()
         val outings = root.optJSONArray("outings") ?: return@synchronized canonical.toString()
         val outing = uniqueObject(outings, outingId) ?: return@synchronized canonical.toString()
         if (!isActiveOuting(outing)) return@synchronized canonical.toString()
@@ -180,6 +228,11 @@ internal object NativeStateStore {
             ?.optJSONObject(outingId)
             ?.optLong(itemId, 0L)
             ?: 0L
+        if (scheduleId != null && !ScheduledWidgetSelectionPolicy.mayApplyCheck(
+                true, true, true, true, true, true,
+                renderRevision, currentRevision, itemRenderRevision, lastItemRevision,
+                currentChecked, checked,
+            )) return@synchronized canonical.toString()
         if (!WidgetCheckMergePolicy.shouldApplyWidgetCheck(
                 itemRenderRevision,
                 lastItemRevision,

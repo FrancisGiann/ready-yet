@@ -227,7 +227,9 @@ class AppController extends ChangeNotifier {
     if (decoded is! Map) throw const FormatException('Invalid widget action');
     final action = Map<String, Object?>.from(decoded);
     final type = action['type'];
-    if (_state.schedules.isNotEmpty || type == 'schedule_outing') {
+    if (_state.schedules.isNotEmpty ||
+        type == 'schedule_outing' ||
+        type == 'scheduled_widget_outing') {
       await refreshExternalState();
     }
     final requestId = action['requestId'];
@@ -236,8 +238,43 @@ class AppController extends ChangeNotifier {
         requestId.length > 160) {
       throw const FormatException('Invalid widget request ID');
     }
+    String? scheduledWidgetOutingId;
+    if (type == 'scheduled_widget_outing') {
+      final id = action['outingId'];
+      final scheduleId = action['scheduleId'];
+      final epoch = action['storageEpoch'];
+      final today = localDateKey(_now());
+      final schedule = _state.schedules
+          .where((value) => value.id == scheduleId)
+          .firstOrNull;
+      final outing = _state.outings
+          .where((value) => value.id == id)
+          .firstOrNull;
+      if (id is! String ||
+          scheduleId is! String ||
+          epoch != _storageEpoch ||
+          schedule == null ||
+          !schedule.runsOn(_now()) ||
+          outing == null ||
+          outing.scheduleId != scheduleId ||
+          outing.blueprintId != schedule.blueprintId ||
+          outing.date != today ||
+          outing.id != schedule.occurrenceId(today) ||
+          (!outing.isActive && !outing.isComplete)) {
+        throw const FormatException(
+          'Scheduled widget checklist is no longer available',
+        );
+      }
+      scheduledWidgetOutingId = outing.id;
+    }
     final previouslyHandled = _state.widgetLaunchRequests[requestId];
     if (previouslyHandled != null) {
+      if (type == 'scheduled_widget_outing' &&
+          previouslyHandled != scheduledWidgetOutingId) {
+        throw const FormatException(
+          'Widget request does not match its original occurrence',
+        );
+      }
       final previous = _state.outings
           .where((o) => o.id == previouslyHandled)
           .firstOrNull;
@@ -296,6 +333,8 @@ class AppController extends ChangeNotifier {
         outingId = created.id;
         _state = _state.copyWith(outings: [..._state.outings, created]);
       }
+    } else if (type == 'scheduled_widget_outing') {
+      outingId = scheduledWidgetOutingId!;
     } else if (type == 'schedule_outing') {
       final id = action['outingId'];
       final scheduleId = action['scheduleId'];

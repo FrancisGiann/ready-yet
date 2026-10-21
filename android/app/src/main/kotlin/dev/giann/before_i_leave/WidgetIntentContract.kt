@@ -19,6 +19,7 @@ internal object WidgetIntentContract {
     const val EXTRA_WIDGET_KIND = "dev.giann.before_i_leave.extra.WIDGET_KIND"
     const val EXTRA_WIDGET_BINDING_GENERATION = "dev.giann.before_i_leave.extra.WIDGET_BINDING_GENERATION"
     const val EXTRA_BLUEPRINT_ID = "dev.giann.before_i_leave.extra.BLUEPRINT_ID"
+    const val EXTRA_SCHEDULE_ID = "dev.giann.before_i_leave.extra.SCHEDULE_ID"
     const val EXTRA_OUTING_ID = "dev.giann.before_i_leave.extra.OUTING_ID"
     const val EXTRA_ITEM_ID = "dev.giann.before_i_leave.extra.ITEM_ID"
     const val EXTRA_DESIRED_CHECKED = "dev.giann.before_i_leave.extra.DESIRED_CHECKED"
@@ -30,6 +31,9 @@ internal object WidgetIntentContract {
     const val TYPE_LIST = "widget_list"
     const val TYPE_OUTING = "widget_outing"
     const val TYPE_TODAY = "widget_today"
+    const val TYPE_SCHEDULED_OUTING = "scheduled_widget_outing"
+    const val TYPE_WIDGET_SCHEDULES = "widget_schedules"
+    const val KIND_SCHEDULED_CHECKLIST = "scheduled_checklist"
 
     fun openDestination(
         context: Context,
@@ -90,6 +94,118 @@ internal object WidgetIntentContract {
         )
     }
 
+    fun openScheduledOuting(
+        context: Context,
+        widgetId: Int,
+        scheduleId: String,
+        outingId: String,
+        storageEpoch: String,
+    ): PendingIntent {
+        val generation = WidgetInstanceConfigStore.scheduledBindingGeneration(context, widgetId).orEmpty()
+        val requestId = UUID.randomUUID().toString()
+        val payload = JSONObject().apply {
+            put("type", TYPE_SCHEDULED_OUTING)
+            put("source", "widget")
+            put("widgetId", widgetId)
+            put("widgetKind", KIND_SCHEDULED_CHECKLIST)
+            put("bindingGeneration", generation)
+            put("scheduleId", scheduleId)
+            put("outingId", outingId)
+            put("storageEpoch", storageEpoch)
+            put("requestId", requestId)
+        }.toString()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_OPEN_WIDGET_DESTINATION
+            data = scheduledWidgetUri(widgetId, TYPE_SCHEDULED_OUTING, generation, scheduleId, outingId, storageEpoch, requestId)
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(MainActivity.EXTRA_WIDGET_LAUNCH_ACTION, payload)
+        }
+        return PendingIntent.getActivity(
+            context,
+            intent.dataString.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    fun openWidgetSchedules(context: Context, widgetId: Int): PendingIntent {
+        val generation = WidgetInstanceConfigStore.scheduledBindingGeneration(context, widgetId).orEmpty()
+        val requestId = UUID.randomUUID().toString()
+        val payload = JSONObject().apply {
+            put("type", TYPE_WIDGET_SCHEDULES)
+            put("source", "widget")
+            put("widgetId", widgetId)
+            put("widgetKind", KIND_SCHEDULED_CHECKLIST)
+            put("bindingGeneration", generation)
+            put("requestId", requestId)
+        }.toString()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_OPEN_WIDGET_DESTINATION
+            data = Uri.Builder().scheme("beforeileave").authority("widget")
+                .appendPath(widgetId.toString()).appendPath(TYPE_WIDGET_SCHEDULES)
+                .appendPath(KIND_SCHEDULED_CHECKLIST).appendPath(generation).appendPath(requestId)
+                .build()
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(MainActivity.EXTRA_WIDGET_LAUNCH_ACTION, payload)
+        }
+        return PendingIntent.getActivity(
+            context,
+            intent.dataString.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun scheduledWidgetUri(
+        widgetId: Int,
+        type: String,
+        generation: String,
+        scheduleId: String,
+        outingId: String,
+        storageEpoch: String,
+        requestId: String,
+    ) = Uri.Builder().scheme("beforeileave").authority("widget")
+        .appendPath(widgetId.toString()).appendPath(type).appendPath(KIND_SCHEDULED_CHECKLIST)
+        .appendPath(generation).appendPath(scheduleId).appendPath(outingId)
+        .appendPath(storageEpoch).appendPath(requestId).build()
+
+    fun scheduledCheckedBroadcast(
+        context: Context,
+        widgetId: Int,
+        scheduleId: String,
+        outingId: String,
+        itemId: String,
+        checked: Boolean,
+        bindingGeneration: String,
+        renderEpoch: String,
+        renderRevision: Long,
+        itemRenderRevision: Long,
+    ): PendingIntent {
+        val intent = Intent(context, WidgetActionReceiver::class.java).apply {
+            action = ACTION_SET_WIDGET_CHECKED
+            data = Uri.Builder().scheme("beforeileave").authority("scheduled-widget-check")
+                .appendPath(widgetId.toString()).appendPath(bindingGeneration).appendPath(renderEpoch)
+                .appendPath(renderRevision.toString()).appendPath(itemRenderRevision.toString())
+                .appendPath(scheduleId).appendPath(outingId).appendPath(itemId).appendPath(checked.toString()).build()
+            putExtra(EXTRA_WIDGET_ID, widgetId)
+            putExtra(EXTRA_WIDGET_KIND, KIND_SCHEDULED_CHECKLIST)
+            putExtra(EXTRA_SCHEDULE_ID, scheduleId)
+            putExtra(EXTRA_OUTING_ID, outingId)
+            putExtra(EXTRA_ITEM_ID, itemId)
+            putExtra(EXTRA_DESIRED_CHECKED, checked)
+            putExtra(EXTRA_BINDING_GENERATION, bindingGeneration)
+            putExtra(EXTRA_RENDER_EPOCH, renderEpoch)
+            putExtra(EXTRA_RENDER_REVISION, renderRevision)
+            putExtra(EXTRA_ITEM_RENDER_REVISION, itemRenderRevision)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            intent.dataString.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     fun checkedBroadcast(
         context: Context,
         widgetId: Int,
@@ -135,32 +251,83 @@ internal object WidgetIntentContract {
         val payload = current.getStringExtra(MainActivity.EXTRA_WIDGET_LAUNCH_ACTION)
         current.action = null
         current.removeExtra(MainActivity.EXTRA_WIDGET_LAUNCH_ACTION)
-        return payload?.takeIf { validateWidgetLaunch(context, current, it) }
-            ?: WidgetLaunchPolicy.invalidLaunchFallback()
+        if (payload == null || !validateWidgetLaunch(context, current, payload)) return WidgetLaunchPolicy.invalidLaunchFallback()
+        val validated = JSONObject(payload)
+        if (validated.optString("type") == TYPE_SCHEDULED_OUTING ||
+            validated.optString("type") == TYPE_WIDGET_SCHEDULES) {
+            validated.put("requestId", UUID.randomUUID().toString())
+            return validated.toString()
+        }
+        return payload
     }
 
     private fun validateWidgetLaunch(context: Context, intent: Intent, encoded: String): Boolean = runCatching {
         val payload = JSONObject(encoded)
         if (payload.optString("source") != "widget") return false
         val type = payload.optString("type")
-        if (type != TYPE_LIST && type != TYPE_OUTING) return false
+        if (type != TYPE_LIST && type != TYPE_OUTING &&
+            type != TYPE_SCHEDULED_OUTING && type != TYPE_WIDGET_SCHEDULES) return false
         val widgetId = payload.optInt("widgetId", -1)
         val kind = payload.optString("widgetKind")
         val generation = payload.optString("bindingGeneration")
-        val blueprintId = payload.optString("blueprintId").takeIf(String::isNotBlank) ?: return false
-        val outingId = payload.optString("outingId").takeIf(String::isNotBlank)
         val requestId = payload.optString("requestId")
         if (widgetId < 0 || generation.isBlank() || requestId.isBlank()) return false
+        val scheduledKind = type == TYPE_SCHEDULED_OUTING || type == TYPE_WIDGET_SCHEDULES
         val quickLists = kind == "quick_lists"
-        if (!quickLists && kind != "checklist") return false
-        if ((type == TYPE_LIST && outingId != null) || (type == TYPE_OUTING && outingId == null)) return false
+        if (scheduledKind != (kind == KIND_SCHEDULED_CHECKLIST)) return false
+        if (!scheduledKind && !quickLists && kind != "checklist") return false
+        val blueprintId = payload.optString("blueprintId").takeIf(String::isNotBlank)
+        val outingId = payload.optString("outingId").takeIf(String::isNotBlank)
+        val scheduleId = payload.optString("scheduleId").takeIf(String::isNotBlank)
+        val storageEpoch = payload.optString("storageEpoch").takeIf(String::isNotBlank)
+        if (type == TYPE_LIST && (blueprintId == null || outingId != null)) return false
+        if (type == TYPE_OUTING && (blueprintId == null || outingId == null)) return false
+        if (type == TYPE_SCHEDULED_OUTING && (scheduleId == null || outingId == null || storageEpoch == null)) return false
+        if (type == TYPE_WIDGET_SCHEDULES && (scheduleId != null || outingId != null)) return false
 
-        val expectedProvider = if (quickLists) QuickListsWidgetProvider::class.java else LeaveWidgetProvider::class.java
+        val expectedProvider = when {
+            scheduledKind -> ScheduledChecklistWidgetProvider::class.java
+            quickLists -> QuickListsWidgetProvider::class.java
+            else -> LeaveWidgetProvider::class.java
+        }
         val manager = AppWidgetManager.getInstance(context)
         val info = manager.getAppWidgetInfo(widgetId)
         val providerOwned = info?.provider == ComponentName(context, expectedProvider)
-        val bindingMatches = WidgetInstanceConfigStore.existingBindingGeneration(context, widgetId, quickLists) == generation
+        val bindingMatches = if (scheduledKind) {
+            WidgetInstanceConfigStore.existingScheduledBindingGeneration(context, widgetId) == generation
+        } else WidgetInstanceConfigStore.existingBindingGeneration(context, widgetId, quickLists) == generation
         if (!providerOwned || !bindingMatches) return false
+
+        if (type == TYPE_WIDGET_SCHEDULES) {
+            val expectedUri = Uri.Builder().scheme("beforeileave").authority("widget")
+                .appendPath(widgetId.toString()).appendPath(type).appendPath(kind).appendPath(generation)
+                .appendPath(requestId).build()
+            return intent.data == expectedUri
+        }
+
+        if (type == TYPE_SCHEDULED_OUTING) {
+            val expectedUri = scheduledWidgetUri(widgetId, type, generation, scheduleId!!, outingId!!, storageEpoch!!, requestId)
+            if (intent.data != expectedUri) return false
+            val state = NativeStateStore.readState(context) ?: return false
+            val root = JSONObject(state)
+            if (root.optString("_storageEpoch") != storageEpoch) return false
+            val projectionNow = System.currentTimeMillis()
+            val projectionToday = ChecklistScheduleState.dateKey(java.util.Calendar.getInstance(java.util.TimeZone.getDefault(), java.util.Locale.US).apply {
+                timeInMillis = projectionNow
+            })
+            val projection = NativeWidgetProjection.scheduledChecklist(state, projectionNow)
+            val exact = projection.scheduleId == scheduleId && projection.outingId == outingId &&
+                projection.openOutingId == outingId && projection.date == projectionToday
+            val matching = ChecklistScheduleState.objects(root.optJSONArray("outings"))
+                .filter { it.optString("id") == outingId && it.optString("scheduleId") == scheduleId && it.optString("date") == projection.date }
+            val matched = matching.singleOrNull() ?: return false
+            val completed = !matched.isNull("completedAt")
+            val skipped = !matched.isNull("dismissedAtUTC")
+            return ScheduledWidgetSelectionPolicy.mayOpenOuting(
+                providerOwned, bindingMatches, true, projection.date == projectionToday,
+                exact && matching.size == 1, ChecklistScheduleState.active(matched), completed, skipped,
+            )
+        }
 
         val configuredChecklistId = if (quickLists) null else WidgetInstanceConfigStore.checklistBlueprintId(context, widgetId)
         val configuredQuickListIds = if (quickLists) WidgetInstanceConfigStore.quickListBlueprintIds(context, widgetId) else emptyList()
@@ -169,7 +336,7 @@ internal object WidgetIntentContract {
         } else {
             configuredChecklistId == blueprintId || (configuredChecklistId == null && type == TYPE_OUTING)
         }
-        if (!selected) return false
+        if (!selected || blueprintId == null) return false
 
         val expectedUri = Uri.Builder().scheme("beforeileave").authority("widget")
             .appendPath(widgetId.toString()).appendPath(type).appendPath(kind)

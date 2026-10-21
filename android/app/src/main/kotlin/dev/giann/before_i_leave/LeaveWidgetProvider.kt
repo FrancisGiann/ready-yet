@@ -54,7 +54,35 @@ class QuickListsWidgetProvider : AppWidgetProvider() {
     }
 }
 
+/** Always follows the selected schedule occurrence for today; it has no per-instance list configuration. */
+class ScheduledChecklistWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(context: Context, manager: AppWidgetManager, widgetIds: IntArray) {
+        val pending = goAsync()
+        ChecklistScheduleScheduler.enqueue(context, pending) {
+            WidgetRenderService.refresh(context.applicationContext, manager, widgetIds, pending)
+        }
+    }
+
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, appWidgetId: Int, newOptions: android.os.Bundle) {
+        WidgetRenderService.refresh(context, manager, intArrayOf(appWidgetId), goAsync())
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        appWidgetIds.forEach { WidgetInstanceConfigStore.removeScheduled(context, it) }
+    }
+
+    companion object {
+        fun refreshAll(context: Context) = WidgetRenderService.refreshAll(context, ScheduledChecklistWidgetProvider::class.java)
+    }
+}
+
 internal object WidgetRenderService {
+    private data class RenderState(
+        val state: JSONObject?,
+        val checklist: ChecklistWidgetProjection,
+        val quick: List<QuickListWidgetProjection>,
+        val scheduled: ScheduledChecklistProjection,
+    )
     private val worker = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "before-i-leave-widget-render").apply { isDaemon = true }
     }
@@ -66,40 +94,65 @@ internal object WidgetRenderService {
         refresh(context.applicationContext, manager, ids, null)
     }
 
+    /** Refresh every installed widget in one worker pass and finish one receiver lifetime afterward. */
+    fun refreshAllKinds(context: Context, pending: BroadcastReceiver.PendingResult?) {
+        val manager = AppWidgetManager.getInstance(context)
+        val providers = listOf(
+            LeaveWidgetProvider::class.java,
+            QuickListsWidgetProvider::class.java,
+            ScheduledChecklistWidgetProvider::class.java,
+        )
+        val ids = providers.flatMap { provider ->
+            manager.getAppWidgetIds(ComponentName(context, provider)).asIterable()
+        }.distinct().toIntArray()
+        refresh(context.applicationContext, manager, ids, pending)
+    }
+
     fun refresh(context: Context, manager: AppWidgetManager, ids: IntArray, pending: BroadcastReceiver.PendingResult?) {
         if (ids.isEmpty()) {
             pending?.finish()
             return
         }
         worker.execute {
-            val states = ids.associateWith { id ->
-                val isQuickLists = manager.getAppWidgetInfo(id)?.provider?.className?.endsWith("QuickListsWidgetProvider") == true
-                WidgetInstanceConfigStore.bindingGeneration(context, id, quickLists = isQuickLists)
-                runCatching { NativeStateStore.readState(context) }.getOrNull()
-                    ?.let { json ->
-                        val root = runCatching { JSONObject(json) }.getOrNull()
-                        val check = NativeWidgetProjection.checklists(json, WidgetInstanceConfigStore.checklistBlueprintId(context, id))
-                        val quick = NativeWidgetProjection.quickLists(json, WidgetInstanceConfigStore.quickListBlueprintIds(context, id))
-                        Triple(root, check, quick)
+            try {
+                val states = ids.associateWith { id ->
+                    val providerName = manager.getAppWidgetInfo(id)?.provider?.className.orEmpty()
+                    when {
+                        providerName.endsWith("QuickListsWidgetProvider") -> WidgetInstanceConfigStore.bindingGeneration(context, id, quickLists = true)
+                        providerName.endsWith("ScheduledChecklistWidgetProvider") -> WidgetInstanceConfigStore.scheduledBindingGeneration(context, id)
+                        else -> WidgetInstanceConfigStore.bindingGeneration(context, id, quickLists = false)
                     }
-            }
-            main.post {
-                try {
-                    ids.forEach { id ->
-                        val state = states[id]
-                        if (state != null) {
-                            if (manager.getAppWidgetInfo(id)?.provider?.className?.endsWith("QuickListsWidgetProvider") == true) {
-                                renderQuick(context, manager, id, state.third)
-                            } else {
-                                renderChecklist(context, manager, id, state.first, state.second)
-                            }
-                        } else {
-                            renderUnavailable(context, manager, id)
+                    runCatching { NativeStateStore.readState(context) }.getOrNull()
+                        ?.let { json ->
+                            val root = runCatching { JSONObject(json) }.getOrNull()
+                            val check = NativeWidgetProjection.checklists(json, WidgetInstanceConfigStore.checklistBlueprintId(context, id))
+                            val quick = NativeWidgetProjection.quickLists(json, WidgetInstanceConfigStore.quickListBlueprintIds(context, id))
+                            val scheduled = NativeWidgetProjection.scheduledChecklist(json)
+                            RenderState(root, check, quick, scheduled)
                         }
-                    }
-                } finally {
-                    pending?.finish()
                 }
+                main.post {
+                    try {
+                        ids.forEach { id ->
+                            val state = states[id]
+                            if (state != null) {
+                                val providerName = manager.getAppWidgetInfo(id)?.provider?.className.orEmpty()
+                                when {
+                                    providerName.endsWith("QuickListsWidgetProvider") -> renderQuick(context, manager, id, state.quick)
+                                    providerName.endsWith("ScheduledChecklistWidgetProvider") -> renderScheduled(context, manager, id, state.state, state.scheduled)
+                                    else -> renderChecklist(context, manager, id, state.state, state.checklist)
+                                }
+                            } else {
+                                renderUnavailable(context, manager, id)
+                            }
+                        }
+                    } finally {
+                        pending?.finish()
+                    }
+                }
+            } catch (error: Exception) {
+                android.util.Log.e("ReadyYetWidgetRender", "Could not prepare widget views", error)
+                pending?.finish()
             }
         }
     }
@@ -110,16 +163,34 @@ internal object WidgetRenderService {
         }
     }
 
+    private fun renderScheduled(
+        context: Context,
+        manager: AppWidgetManager,
+        widgetId: Int,
+        state: JSONObject?,
+        projection: ScheduledChecklistProjection,
+    ) {
+        if (state == null) {
+            renderUnavailable(context, manager, widgetId)
+            return
+        }
+        updateSizedViews(context, manager, widgetId) { size ->
+            checklistViews(context, widgetId, state, projection.checklist, size, projection)
+        }
+    }
+
     private fun checklistViews(
         context: Context,
         widgetId: Int,
         state: JSONObject?,
         projection: ChecklistWidgetProjection,
         size: WidgetSize,
+        scheduled: ScheduledChecklistProjection? = null,
     ): RemoteViews {
         val epoch = state?.optString("_storageEpoch", "legacy-v1") ?: "legacy-v1"
         val revision = state?.optLong("_nativeRevision", 0L) ?: 0L
-        val generation = WidgetInstanceConfigStore.bindingGeneration(context, widgetId, quickLists = false).orEmpty()
+        val generation = if (scheduled != null) WidgetInstanceConfigStore.scheduledBindingGeneration(context, widgetId).orEmpty()
+            else WidgetInstanceConfigStore.bindingGeneration(context, widgetId, quickLists = false).orEmpty()
         val tiny = WidgetResizePolicy.usesTwoByTwoLayout(size.widthDp, size.heightDp)
         val compact = WidgetResizePolicy.checklistUsesCompactLayout(size.widthDp, size.heightDp, size.fontScale)
         val maxRows = WidgetResizePolicy.checklistRows(size.widthDp, size.heightDp, size.fontScale)
@@ -131,7 +202,7 @@ internal object WidgetRenderService {
         val rowIds = intArrayOf(R.id.widget_item_1, R.id.widget_item_2, R.id.widget_item_3, R.id.widget_item_4, R.id.widget_item_5)
         val indicatorIds = intArrayOf(R.id.widget_item_indicator_1, R.id.widget_item_indicator_2, R.id.widget_item_indicator_3, R.id.widget_item_indicator_4, R.id.widget_item_indicator_5)
         val labelIds = intArrayOf(R.id.widget_item_label_1, R.id.widget_item_label_2, R.id.widget_item_label_3, R.id.widget_item_label_4, R.id.widget_item_label_5)
-        return RemoteViews(context.packageName, layout).apply {
+        val views = RemoteViews(context.packageName, layout).apply {
             if (compact) {
                 setViewVisibility(R.id.widget_brand_tagline, View.GONE)
                 setViewVisibility(R.id.widget_progress_bar, View.GONE)
@@ -166,7 +237,19 @@ internal object WidgetRenderService {
                     )
                     setTextViewText(labelIds[index], item.label)
                     setContentDescription(rowId, if (item.checked) "${item.label}, packed" else "${item.label}, not packed")
-                    if (projection.outingId != null && item.canToggle) {
+                    val scheduledCheckOutingId = scheduled?.checkOutingId
+                    if (scheduledCheckOutingId != null && item.canToggle) {
+                        setOnClickPendingIntent(rowId, WidgetIntentContract.scheduledCheckedBroadcast(
+                            context, widgetId, scheduled.scheduleId.orEmpty(), scheduledCheckOutingId, item.id, !item.checked,
+                            generation, epoch, revision, oldItemRevision,
+                        ))
+                    } else if (scheduled != null && scheduled.openOutingId != null && scheduled.scheduleId != null) {
+                        setOnClickPendingIntent(rowId, WidgetIntentContract.openScheduledOuting(
+                            context, widgetId, scheduled.scheduleId, scheduled.openOutingId, epoch,
+                        ))
+                    } else if (scheduled != null) {
+                        setOnClickPendingIntent(rowId, WidgetIntentContract.openWidgetSchedules(context, widgetId))
+                    } else if (projection.outingId != null && item.canToggle) {
                         setOnClickPendingIntent(rowId, WidgetIntentContract.checkedBroadcast(
                             context, widgetId, projection.outingId, item.id, !item.checked,
                             generation, epoch, revision, oldItemRevision,
@@ -176,8 +259,16 @@ internal object WidgetRenderService {
             }
             val shownItems = minOf(projection.items.size, maxRows)
             val overflow = (projection.totalCount - shownItems).coerceAtLeast(0)
-            val configure = projection.blueprintId == null || projection.stateMessage == "This list was deleted"
+            val configure = scheduled == null && (projection.blueprintId == null || projection.stateMessage == "This list was deleted")
             val action = when {
+                scheduled != null -> when (scheduled.state) {
+                    "completed" -> "Review completed checklist"
+                    "skipped" -> "View schedules"
+                    "no_schedules" -> "Set up schedules"
+                    "no_today" -> "View schedules"
+                    "unavailable" -> "Open app"
+                    else -> "Open scheduled checklist"
+                }
                 configure -> "Choose a list"
                 projection.outingId == null && projection.canStart -> "Open checklist"
                 projection.stateMessage == "Saved lists could not be read" -> "Open app"
@@ -204,8 +295,13 @@ internal object WidgetRenderService {
             } else {
                 setTextViewText(R.id.widget_action, if (overflow > 0 && maxRows > 0) "$action · +$overflow more" else action)
             }
-            val destination = if (configure) WidgetIntentContract.configuration(context, widgetId, quickLists = false)
-                else WidgetIntentContract.openDestination(context, widgetId, projection.blueprintId, projection.outingId)
+            val destination = when {
+                scheduled != null && scheduled.openOutingId != null && scheduled.scheduleId != null ->
+                    WidgetIntentContract.openScheduledOuting(context, widgetId, scheduled.scheduleId, scheduled.openOutingId, epoch)
+                scheduled != null -> WidgetIntentContract.openWidgetSchedules(context, widgetId)
+                configure -> WidgetIntentContract.configuration(context, widgetId, quickLists = false)
+                else -> WidgetIntentContract.openDestination(context, widgetId, projection.blueprintId, projection.outingId)
+            }
             val openDescription = when {
                 configure -> "Choose a checklist for this widget"
                 compact && maxRows == 0 -> "${projection.title}. ${projection.progress}. Open it in Ready Yet?"
@@ -216,6 +312,46 @@ internal object WidgetRenderService {
             setOnClickPendingIntent(actionTarget, destination)
             setOnClickPendingIntent(R.id.widget_root, destination)
         }
+        if (scheduled == null) return views
+        val openText = when (scheduled.state) {
+            "completed" -> "Review completed"
+            "skipped", "no_today" -> "View schedules"
+            "no_schedules" -> "Set up schedules"
+            "unavailable" -> "Open app"
+            else -> "Open checklist"
+        }
+        val packedCount = if (projection.totalCount > 0) "${projection.checkedCount}/${projection.totalCount}" else ""
+        val packedLabel = if (packedCount.isNotBlank()) "$packedCount packed" else ""
+        val primaryStatus = listOf(if (tiny) packedCount else packedLabel, scheduled.dueLabel)
+            .filter(String::isNotBlank).joinToString(" · ")
+        val tinyStatus = when (scheduled.state) {
+            "no_today" -> scheduled.upcomingLabel.ifBlank { "View schedules" }
+            "no_schedules" -> "Set up in app"
+            else -> primaryStatus
+        }
+        views.setTextViewText(R.id.widget_progress, primaryStatus)
+        views.setContentDescription(R.id.widget_progress, listOf(projection.progress, primaryStatus, scheduled.upcomingLabel)
+            .filter(String::isNotBlank).joinToString(". "))
+        val actionText = if (scheduled.upcomingLabel.isBlank()) openText else "$openText · ${scheduled.upcomingLabel}"
+        views.setTextViewText(R.id.widget_action, if (!tiny && compact && maxRows == 0) {
+            listOf(primaryStatus, scheduled.upcomingLabel).filter(String::isNotBlank).joinToString(" · ")
+        } else actionText)
+        views.setContentDescription(R.id.widget_root, listOf(projection.title, projection.progress, primaryStatus, scheduled.upcomingLabel, openText)
+            .filter(String::isNotBlank).joinToString(". "))
+        views.setContentDescription(if (tiny) R.id.widget_action_container else R.id.widget_action,
+            listOf(projection.title, projection.progress, primaryStatus, scheduled.upcomingLabel, openText)
+                .filter(String::isNotBlank).joinToString(". "))
+        if (tiny) {
+            val tinyActionText = when (scheduled.state) {
+                "active", "empty", "completed", "skipped" -> projection.title
+                "no_today" -> "Nothing today"
+                "no_schedules" -> "No schedules yet"
+                else -> openText
+            }
+            views.setTextViewText(R.id.widget_action, tinyActionText)
+            views.setTextViewText(R.id.widget_small_progress, tinyStatus)
+        }
+        return views
     }
 
     private fun renderQuick(context: Context, manager: AppWidgetManager, widgetId: Int, projections: List<QuickListWidgetProjection>) {
@@ -362,10 +498,37 @@ internal object WidgetRenderService {
     private fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 
     private fun renderUnavailable(context: Context, manager: AppWidgetManager, widgetId: Int) {
-        val quick = manager.getAppWidgetInfo(widgetId)?.provider?.className?.endsWith("QuickListsWidgetProvider") == true
+        val providerName = manager.getAppWidgetInfo(widgetId)?.provider?.className.orEmpty()
+        val quick = providerName.endsWith("QuickListsWidgetProvider")
+        val scheduled = providerName.endsWith("ScheduledChecklistWidgetProvider")
         updateSizedViews(context, manager, widgetId) { size ->
             if (quick) unavailableQuickViews(context, widgetId, size)
+            else if (scheduled) unavailableScheduledViews(context, widgetId, size)
             else unavailableChecklistViews(context, widgetId, size)
+        }
+    }
+
+    private fun unavailableScheduledViews(context: Context, widgetId: Int, size: WidgetSize): RemoteViews {
+        val tiny = WidgetResizePolicy.usesTwoByTwoLayout(size.widthDp, size.heightDp)
+        val layout = if (tiny) R.layout.before_i_leave_widget_2x2 else R.layout.before_i_leave_widget_compact
+        val destination = WidgetIntentContract.openWidgetSchedules(context, widgetId)
+        return RemoteViews(context.packageName, layout).apply {
+            setViewVisibility(R.id.widget_brand_tagline, View.GONE)
+            setTextViewText(R.id.widget_title, "Scheduled checklists")
+            setTextViewText(R.id.widget_progress, "Open the app to load schedules")
+            setViewVisibility(R.id.widget_progress_bar, View.GONE)
+            setViewVisibility(R.id.widget_title_row, View.GONE)
+            setViewVisibility(R.id.widget_item_rows, View.GONE)
+            setTextViewText(R.id.widget_action, if (tiny) "Open schedules" else "Open scheduled checklists")
+            setOnClickPendingIntent(R.id.widget_root, destination)
+            val target = if (tiny) R.id.widget_action_container else R.id.widget_action
+            if (tiny) {
+                setInt(target, "setMinimumHeight", dp(context, WidgetResizePolicy.twoByTwoChecklistFooterHeightDp(size.fontScale)))
+                setTextViewText(R.id.widget_small_progress, "Load schedules")
+            }
+            setOnClickPendingIntent(target, destination)
+            setContentDescription(target, "Open Ready Yet? schedules to load the saved scheduled checklist.")
+            setContentDescription(R.id.widget_root, "Scheduled checklists are unavailable. Open schedules in Ready Yet?.")
         }
     }
 

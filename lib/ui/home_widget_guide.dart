@@ -159,7 +159,7 @@ class _HomeWidgetGuideState extends State<HomeWidgetGuide> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Both widgets start at 2×2. Resize for more items or lists.',
+                'Widgets start at 2×2. Resize for more items or lists.',
                 style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: context.appColors.muted),
               ),
@@ -192,6 +192,21 @@ class _HomeWidgetGuideState extends State<HomeWidgetGuide> {
                   palette: widgetColors,
                 ),
               ),
+              const SizedBox(height: 16),
+              Text(
+                "Today's scheduled checklist",
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Automatically follows today’s scheduled checklist. See your departure time and progress, check items as you pack, or tap to open that exact outing. Finished checklists stay in history.',
+              ),
+              if (_snapshot['pinSupported'] == true)
+                TextButton.icon(
+                  onPressed: _pinning ? null : () => _requestPin('scheduled'),
+                  icon: const Icon(Icons.event_repeat_rounded),
+                  label: const Text('Add scheduled checklist widget'),
+                ),
               const SizedBox(height: 13),
               if (_snapshot['pinSupported'] == true)
                 _PinButtons(

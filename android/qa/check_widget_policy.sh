@@ -16,12 +16,15 @@ trap 'rm -rf "$OUTPUT_DIR"' EXIT HUP INT TERM
 "$JAVAC_BIN" -d "$OUTPUT_DIR" \
   "$ROOT_DIR/android/app/src/main/java/dev/giann/before_i_leave/WidgetCheckMergePolicy.java" \
   "$ROOT_DIR/android/app/src/main/java/dev/giann/before_i_leave/WidgetLaunchPolicy.java" \
+  "$ROOT_DIR/android/app/src/main/java/dev/giann/before_i_leave/ScheduledWidgetSelectionPolicy.java" \
   "$ROOT_DIR/android/app/src/main/java/dev/giann/before_i_leave/WidgetResizePolicy.java" \
   "$ROOT_DIR/android/qa/WidgetCheckMergePolicyCheck.java" \
   "$ROOT_DIR/android/qa/WidgetLaunchPolicyCheck.java" \
+  "$ROOT_DIR/android/qa/ScheduledWidgetSelectionPolicyCheck.java" \
   "$ROOT_DIR/android/qa/WidgetResizePolicyCheck.java" \
   "$ROOT_DIR/android/qa/WidgetCompactAllocationCheck.java"
 "$JAVA_BIN" -cp "$OUTPUT_DIR" WidgetCheckMergePolicyCheck
 "$JAVA_BIN" -cp "$OUTPUT_DIR" WidgetLaunchPolicyCheck
+"$JAVA_BIN" -cp "$OUTPUT_DIR" ScheduledWidgetSelectionPolicyCheck
 "$JAVA_BIN" -cp "$OUTPUT_DIR" WidgetResizePolicyCheck
 "$JAVA_BIN" -cp "$OUTPUT_DIR" WidgetCompactAllocationCheck

@@ -2,6 +2,8 @@ package dev.giann.before_i_leave
 
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.util.Locale
+import java.util.Calendar
 
 internal data class NativeWidgetItem(
     val id: String,
@@ -37,6 +39,21 @@ internal data class QuickListWidgetProjection(
     val hasActive: Boolean = outingId != null,
 )
 
+internal data class ScheduledChecklistProjection(
+    val state: String,
+    val checklist: ChecklistWidgetProjection,
+    val scheduleId: String?,
+    val outingId: String?,
+    val openOutingId: String?,
+    val date: String,
+    val departureMinute: Int?,
+    val dueLabel: String,
+    val upcomingLabel: String,
+    val additionalCount: Int,
+) {
+    val checkOutingId: String? get() = outingId.takeIf { state == "active" }
+}
+
 /** Projects the durable Flutter model into the small, read-only widget view model. */
 internal object NativeWidgetProjection {
     private data class Blueprint(
@@ -59,8 +76,17 @@ internal object NativeWidgetProjection {
     ) {
         val active: Boolean get() = !completed && !dismissed && (scheduleId == null || date == todayKey())
     }
+    private data class ScheduledSlot(
+        val schedule: ChecklistSchedule,
+        val date: String,
+        val departure: Long,
+        val outing: Outing?,
+    )
 
     private fun todayKey() = ChecklistScheduleState.dateKey(java.util.Calendar.getInstance(java.util.TimeZone.getDefault(), java.util.Locale.US))
+
+    private fun Outing.activeOn(date: String): Boolean = !completed && !dismissed &&
+        (scheduleId == null || this.date == date)
 
     private fun latestActive(outings: List<Outing>): Outing? = outings.filter(Outing::active)
         .sortedWith(compareBy<Outing> { if (it.scheduleId != null) 0 else 1 }.thenByDescending { it.startedAt }).firstOrNull()
@@ -171,6 +197,179 @@ internal object NativeWidgetProjection {
         }
     }
 
+    fun scheduledChecklist(stateJson: String?, now: Long = System.currentTimeMillis()): ScheduledChecklistProjection {
+        val state = parseState(stateJson)
+        val date = Calendar.getInstance(java.util.TimeZone.getDefault(), Locale.US).apply { timeInMillis = now }
+        val today = ChecklistScheduleState.dateKey(date)
+        val saved = state ?: return scheduledMessage("unavailable", "Scheduled checklists", "Open the app to load saved schedules", today)
+        val enabled = saved.schedules.filter { it.enabled }
+        if (enabled.isEmpty()) return scheduledMessage("no_schedules", "Scheduled checklists", "No schedules yet", today)
+        val blueprints = saved.blueprints.associateBy { it.id }
+        val outings = saved.outings.associateBy { it.id }
+        val todaysSchedules = enabled.filter { it.blueprintId in blueprints && ScheduleTimePolicy.isoWeekday(date) in it.weekdays }
+        val occurrences = todaysSchedules.mapNotNull { schedule ->
+            val id = schedule.occurrenceId(today)
+            val outing = outings[id]?.takeIf { it.scheduleId == schedule.id && it.date == today } ?: return@mapNotNull null
+            ScheduledSlot(schedule, today, schedule.departure(date), outing)
+        }
+        val candidates = occurrences.mapNotNull { occurrence ->
+            val outing = occurrence.outing ?: return@mapNotNull null
+            ScheduledWidgetSelectionPolicy.Candidate(
+                occurrence.schedule.id,
+                outing.id,
+                occurrence.schedule.departureMinute,
+                occurrence.departure,
+                occurrence.departure <= now,
+                outing.activeOn(today),
+                outing.completed,
+                outing.dismissed,
+            )
+        }
+        val selectedCandidate = ScheduledWidgetSelectionPolicy.select(candidates)
+        val selected = selectedCandidate?.let { candidate -> occurrences.firstOrNull {
+            it.schedule.id == candidate.scheduleId && it.outing?.id == candidate.outingId
+        } }
+        val upcomingSlots = upcomingSlots(enabled, blueprints.keys, outings, today, now, selected?.let { it.schedule.id to it.date })
+        val next = upcomingSlots.minWithOrNull(compareBy<ScheduledSlot> { it.departure }.thenBy { it.schedule.id })
+        val additionalCount = todaysSchedules.count { schedule ->
+            if (schedule.id == selected?.schedule?.id) false
+            else occurrences.firstOrNull { it.schedule.id == schedule.id }?.outing?.let { it.activeOn(today) } ?: true
+        }
+        val upcoming = upcomingLabel(next, today, additionalCount)
+        if (selected == null || selected.outing == null) {
+            val progress = if (todaysSchedules.isEmpty()) "Nothing scheduled today" else "No checklist is scheduled today"
+            return scheduledMessage("no_today", "Scheduled checklists", progress, today, upcoming, additionalCount)
+        }
+        val outing = selected.outing
+        val active = outing.activeOn(today)
+        val completed = outing.completed
+        val skipped = outing.dismissed
+        val checked = outing.items.count(NativeWidgetItem::checked)
+        val total = outing.items.size
+        val stateName = when {
+            active && total == 0 -> "empty"
+            active -> "active"
+            completed -> "completed"
+            skipped -> "skipped"
+            else -> "no_today"
+        }
+        val dueLabel = when (stateName) {
+            "completed" -> "Done ${timeLabel(selected.schedule.departureMinute)}"
+            "skipped" -> "Skipped ${timeLabel(selected.schedule.departureMinute)}"
+            "empty" -> "Empty ${timeLabel(selected.schedule.departureMinute)}"
+            else -> if (selected.departure <= now) "Overdue ${timeLabel(selected.schedule.departureMinute)}"
+                else "Due ${timeLabel(selected.schedule.departureMinute)}"
+        }
+        val message = when (stateName) {
+            "completed" -> "Completed today"
+            "skipped" -> "Skipped today"
+            "empty" -> "This scheduled list is empty"
+            else -> null
+        }
+        val projection = ChecklistWidgetProjection(
+            blueprintId = outing.blueprintId,
+            outingId = outing.id.takeIf { active },
+            title = outing.blueprintName,
+            progress = when (stateName) {
+                "completed" -> "Completed today"
+                "skipped" -> "Skipped today"
+                "empty" -> "This scheduled list is empty"
+                else -> "$checked of $total packed"
+            },
+            date = outing.date,
+            items = outing.items.take(5).map { if (active) it else it.copy(canToggle = false) },
+            canOpenList = true,
+            canStart = false,
+            stateMessage = message,
+            checkedCount = checked,
+            totalCount = total,
+            completedHistory = completed,
+        )
+        return ScheduledChecklistProjection(
+            state = stateName,
+            checklist = projection,
+            scheduleId = selected.schedule.id,
+            outingId = outing.id,
+            openOutingId = outing.id.takeIf { active || completed },
+            date = today,
+            departureMinute = selected.schedule.departureMinute,
+            dueLabel = dueLabel,
+            upcomingLabel = upcoming,
+            additionalCount = additionalCount,
+        )
+    }
+
+    private fun upcomingSlots(
+        schedules: List<ChecklistSchedule>,
+        blueprintIds: Set<String>,
+        outings: Map<String, Outing>,
+        today: String,
+        now: Long,
+        selected: Pair<String, String>?,
+    ): List<ScheduledSlot> = buildList {
+        for (offset in 0..7) {
+            val day = Calendar.getInstance(java.util.TimeZone.getDefault(), Locale.US).apply {
+                timeInMillis = now
+                add(Calendar.DAY_OF_MONTH, offset)
+            }
+            val key = ChecklistScheduleState.dateKey(day)
+            for (schedule in schedules) {
+                if (schedule.blueprintId !in blueprintIds || ScheduleTimePolicy.isoWeekday(day) !in schedule.weekdays) continue
+                val departure = schedule.departure(day)
+                if (departure <= now || selected == (schedule.id to key)) continue
+                val outing = outings[schedule.occurrenceId(key)]?.takeIf { it.scheduleId == schedule.id && it.date == key }
+                if (outing?.completed == true || outing?.dismissed == true) continue
+                add(ScheduledSlot(schedule, key, departure, outing))
+            }
+        }
+    }
+
+    private fun upcomingLabel(next: ScheduledSlot?, today: String, additionalCount: Int): String = buildString {
+        if (next != null) {
+            append("Next ")
+            if (next.date != today) append(dayTimeLabel(next.departure)) else append(timeLabel(next.schedule.departureMinute))
+        }
+        if (additionalCount > 0) {
+            if (isNotEmpty()) append(" · ")
+            append("+$additionalCount today")
+        }
+    }
+
+    private fun scheduledMessage(
+        state: String,
+        title: String,
+        progress: String,
+        date: String,
+        upcoming: String = "",
+        additionalCount: Int = 0,
+    ) = ScheduledChecklistProjection(
+        state = state,
+        checklist = ChecklistWidgetProjection(
+            blueprintId = null,
+            outingId = null,
+            title = title,
+            progress = progress,
+            date = date,
+            items = emptyList(),
+            canOpenList = false,
+            canStart = false,
+            stateMessage = progress,
+            totalCount = 0,
+        ),
+        scheduleId = null,
+        outingId = null,
+        openOutingId = null,
+        date = date,
+        departureMinute = null,
+        dueLabel = progress,
+        upcomingLabel = upcoming,
+        additionalCount = additionalCount,
+    )
+
+    private fun timeLabel(minute: Int): String = String.format(Locale.getDefault(), "%02d:%02d", minute / 60, minute % 60)
+
+    private fun dayTimeLabel(instant: Long): String = java.text.SimpleDateFormat("EEE HH:mm", Locale.getDefault()).format(java.util.Date(instant))
+
     private fun outingProjection(outing: Outing): ChecklistWidgetProjection {
         val checked = outing.items.count(NativeWidgetItem::checked)
         return ChecklistWidgetProjection(
@@ -194,7 +393,12 @@ internal object NativeWidgetProjection {
             (blueprintId == null || it.blueprintId == blueprintId) }
         .sortedWith(compareBy<Outing> { if (it.active) 0 else 1 }.thenBy { it.startedAt }).firstOrNull()
 
-    private data class State(val blueprints: List<Blueprint>, val outings: List<Outing>, val enabledScheduleIds: Set<String>)
+    private data class State(
+        val blueprints: List<Blueprint>,
+        val outings: List<Outing>,
+        val enabledScheduleIds: Set<String>,
+        val schedules: List<ChecklistSchedule>,
+    )
 
     private fun parseState(source: String?): State? {
       return try {
@@ -253,8 +457,9 @@ internal object NativeWidgetProjection {
                 ))
             }
         }
-        val enabled = ChecklistScheduleState.schedules(root).filter { it.enabled }.map { it.id }.toSet()
-        State(blueprints, outings, enabled)
+        val schedules = ChecklistScheduleState.schedules(root)
+        val enabled = schedules.filter { it.enabled }.map { it.id }.toSet()
+        State(blueprints, outings, enabled, schedules)
       } catch (_: Exception) {
         null
       }

@@ -32,7 +32,10 @@ internal class ReminderRescheduleReceiver : BroadcastReceiver() {
             "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" -> {
                 ReminderScheduler.rescheduleIfEnabled(context,
                     force = ReminderReschedulePolicy.shouldForceForAction(intent.action))
-                ChecklistScheduleScheduler.enqueue(context, goAsync())
+                val pending = goAsync()
+                ChecklistScheduleScheduler.enqueue(context, pending) {
+                    WidgetRenderService.refreshAllKinds(context.applicationContext, pending)
+                }
             }
         }
     }

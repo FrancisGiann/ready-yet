@@ -26,8 +26,20 @@ internal object ChecklistScheduleScheduler {
     private const val REQUEST = 7820
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "ready-yet-schedules").apply { isDaemon = true } }
 
-    fun enqueue(context: Context, pending: BroadcastReceiver.PendingResult? = null) {
-        worker.execute { try { refresh(context.applicationContext) } finally { pending?.finish() } }
+    fun enqueue(
+        context: Context,
+        pending: BroadcastReceiver.PendingResult? = null,
+        after: (() -> Unit)? = null,
+    ) {
+        worker.execute {
+            try { refresh(context.applicationContext) } finally {
+                if (after == null) pending?.finish()
+                else runCatching(after).onFailure { error ->
+                    Log.e("ReadyYetSchedules", "Could not refresh widgets after schedule update", error)
+                    pending?.finish()
+                }
+            }
+        }
     }
 
     fun status(context: Context): Map<String, Any?> {
@@ -84,6 +96,12 @@ internal object ChecklistScheduleScheduler {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }.timeInMillis
         val needsAlarm = candidates.isNotEmpty()
+        // Scheduled checklist metadata changes at each local departure even
+        // when notifications are blocked. Reuse this single next-event alarm;
+        // it is not a countdown or polling loop.
+        candidates.filter { it.departure > now }.minByOrNull { it.departure }?.let { event ->
+            next = minOf(next, event.departure)
+        }
         if (allowed) for (event in candidates) {
             val outing = outings[event.id]
             if (outing != null && !incomplete(outing)) continue
@@ -226,8 +244,6 @@ internal object ChecklistScheduleScheduler {
             (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(id, REQUEST)
         } else return
         refresh(context)
-        LeaveWidgetProvider.refreshAll(context)
-        QuickListsWidgetProvider.refreshAll(context)
     }
 
     fun consumeOpen(context: Context, intent: Intent): String? {
@@ -256,7 +272,13 @@ internal object ChecklistScheduleScheduler {
     fun dispatch(context: Context, intent: Intent, pending: BroadcastReceiver.PendingResult) {
         worker.execute { try { handle(context.applicationContext, intent) } catch (error: Exception) {
             Log.e("ReadyYetSchedules", "Could not process schedule action", error)
-        } finally { pending.finish() } }
+        } finally {
+            runCatching { WidgetRenderService.refreshAllKinds(context.applicationContext, pending) }
+                .onFailure { error ->
+                    Log.e("ReadyYetSchedules", "Could not refresh widgets after schedule action", error)
+                    pending.finish()
+                }
+        } }
     }
 }
 

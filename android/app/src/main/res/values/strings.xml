@@ -5,6 +5,8 @@
     <string name="widget_default_title">Ready Yet?</string>
     <string name="widget_checklist_label">Ready Yet? · Packing checklist</string>
     <string name="widget_quick_lists_label">Ready Yet? · Quick lists</string>
+    <string name="widget_scheduled_checklist_label">Ready Yet? · Scheduled checklist</string>
+    <string name="scheduled_checklist_widget_description">Today’s scheduled packing checklist. Resize it for more items.</string>
     <string name="shortcut_pack_today_short">Pack today</string>
     <string name="shortcut_pack_today_long">Pack for today</string>
     <string name="widget_description">A compact 2×2 packing checklist. Resize it for more items.</string>
